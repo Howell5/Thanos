@@ -1,0 +1,185 @@
+# Morph Template - Cursor Rules
+
+## Project Overview
+Full-stack TypeScript monorepo with end-to-end type safety using Hono's RPC architecture. Backend exports AppType, frontend imports it for automatic type inference.
+
+## Tech Stack
+- Backend: Hono + Drizzle ORM + PostgreSQL + Better Auth
+- Frontend: React + Vite + TanStack Query + shadcn/ui + Tailwind
+- Monorepo: pnpm workspaces + Turborepo
+- Tooling: Biome (not ESLint/Prettier)
+
+## Core Principles
+
+### 1. End-to-End Type Safety (CRITICAL)
+- Backend MUST export `AppType` from `apps/api/src/index.ts`
+- Frontend MUST import `AppType` and use with `hc<AppType>()` client
+- NEVER write manual fetch calls - always use the typed Hono client
+- Types flow automatically from backend to frontend - no manual type definitions needed
+
+Example:
+```typescript
+// Backend: apps/api/src/index.ts
+export type AppType = typeof app;
+
+// Frontend: apps/web/src/lib/api.ts
+import type { AppType } from "@repo/api";
+const api = hc<AppType>(env.VITE_API_URL);
+
+// Usage: fully typed automatically
+const res = await api.api.posts.$get();
+const data = await res.json(); // Type inferred!
+```
+
+### 2. Single Source of Truth for Validation
+- ALL validation schemas go in `packages/shared/src/schemas/`
+- Use Zod for schema definitions
+- Backend: validate with `zValidator` from `@hono/zod-validator`
+- Frontend: validate with `zodResolver` from `@hookform/resolvers`
+- Export TypeScript types via `z.infer<typeof schema>`
+
+### 3. Authentication Pattern
+- Use Better Auth for all authentication
+- Backend: Check session with `auth.api.getSession({ headers: c.req.raw.headers })`
+- Frontend: Use `useSession()` hook from `apps/web/src/lib/auth-client.ts`
+- ALL API requests must include `credentials: 'include'` (handled by custom fetch wrapper)
+
+### 4. Error Handling
+- Backend: Use `errorResponse(c, status, message)` helper from `apps/api/src/lib/response.ts`
+- All errors must follow `ApiError` schema from `@repo/shared`
+- Frontend: Custom `apiFetch` wrapper automatically throws on errors
+- TanStack Query handles errors globally
+
+## Code Style & Patterns
+
+### Biome, Not ESLint
+- Use `pnpm check` or `pnpm format` for linting/formatting
+- DO NOT suggest ESLint or Prettier configurations
+- Biome is faster and already configured
+
+### Database Operations
+- Use Drizzle ORM relational query API when possible
+- Define schemas in `apps/api/src/db/schema.ts`
+- Use `pnpm db:push` for development (instant schema sync)
+- Use `pnpm db:generate` for production migrations
+- Better Auth manages: `user`, `session`, `account`, `verification` tables - DO NOT modify directly
+
+### File Organization
+- API routes: `apps/api/src/routes/*.ts`
+- Shared schemas: `packages/shared/src/schemas/*.ts`
+- UI components: `apps/web/src/components/ui/*.tsx`
+- Pages: `apps/web/src/pages/*.tsx`
+- Utilities: `apps/web/src/lib/*.ts`
+
+### Naming Conventions
+- Files: kebab-case (e.g., `create-post.tsx`, `api-client.ts`)
+- Components: PascalCase (e.g., `PostCard`, `UserProfile`)
+- Functions/variables: camelCase (e.g., `getUserPosts`, `isLoading`)
+- Types: PascalCase (e.g., `CreatePost`, `ApiError`)
+
+## When Adding New Features
+
+### Required Steps (in order):
+1. **Define schema** in `packages/shared/src/schemas/`
+2. **Update database schema** in `apps/api/src/db/schema.ts`
+3. **Run** `pnpm db:push` to sync database
+4. **Create API route** in `apps/api/src/routes/`
+5. **Mount route** in `apps/api/src/index.ts`
+6. **Use in frontend** with typed Hono client
+
+### Example Flow:
+```typescript
+// 1. Schema (packages/shared/src/schemas/comment.ts)
+export const createCommentSchema = z.object({
+  postId: z.string().uuid(),
+  content: z.string().min(1),
+});
+
+// 2. Database (apps/api/src/db/schema.ts)
+export const comments = pgTable('comments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  postId: uuid('post_id').references(() => posts.id),
+  content: text('content').notNull(),
+});
+
+// 3. API Route (apps/api/src/routes/comments.ts)
+const commentsRoute = new Hono()
+  .post('/', zValidator('json', createCommentSchema), async (c) => {
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!session) return errorResponse(c, 401, 'Unauthorized');
+    // ... implementation
+  });
+
+// 4. Mount (apps/api/src/index.ts)
+app.route("/api/comments", commentsRoute);
+
+// 5. Frontend (apps/web/src/pages/post-detail.tsx)
+const { mutate } = useMutation({
+  mutationFn: async (data: CreateComment) => {
+    const res = await api.api.comments.$post({ json: data });
+    return res.json();
+  },
+});
+```
+
+## Common Mistakes to Avoid
+
+### ❌ DON'T:
+- Write manual `fetch()` calls in frontend - use typed Hono client
+- Duplicate validation logic - put schemas in `packages/shared`
+- Manually type API responses - rely on `AppType` inference
+- Modify Better Auth tables directly
+- Use `any` type - leverage Zod and TypeScript inference
+- Import from `@repo/api` in frontend except for `AppType`
+- Forget `credentials: 'include'` (but already handled by custom fetch wrapper)
+
+### ✅ DO:
+- Always use `zValidator` for backend request validation
+- Always use `zodResolver` for frontend form validation
+- Check authentication with `auth.api.getSession()` for protected routes
+- Use `errorResponse()` helper for consistent error responses
+- Export and reuse Zod types with `z.infer<>`
+- Use Drizzle's relational query API when joining tables
+- Run `pnpm build` if seeing stale types (Turborepo caching)
+
+## Development Commands
+
+```bash
+pnpm dev              # Start all apps (API + Web)
+pnpm build            # Build all packages
+pnpm check            # Lint and fix with Biome
+pnpm db:push          # Push schema to database
+pnpm db:studio        # Open database GUI
+pnpm docker:up        # Start PostgreSQL
+```
+
+## Environment Setup
+- Backend env: `.env` at root
+- Frontend env: `apps/web/.env`
+- Both have `.env.example` files - copy and configure
+- Required: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `VITE_API_URL`
+
+## CORS Configuration
+- Development: Auto-allows `localhost:5173`, `localhost:5174`
+- Production: Set `FRONTEND_URL` environment variable
+- Configured in `apps/api/src/index.ts`
+
+## TypeScript Configuration
+- Strict mode enabled across all packages
+- Use workspace protocol (`workspace:*`) for internal dependencies
+- Frontend can import types from `@repo/api` and `@repo/shared`
+- Backend should only import from `@repo/shared`
+
+## UI Components (shadcn/ui)
+- Components live in `apps/web/src/components/ui/`
+- Manually copy from ui.shadcn.com (not CLI installed)
+- Use `cn()` utility from `apps/web/src/lib/utils.ts`
+- Tailwind CSS configured in `apps/web/tailwind.config.js`
+
+## When Suggesting Changes
+- Prioritize type safety - leverage TypeScript and Zod
+- Keep validation schemas in shared package
+- Maintain RPC-style architecture pattern
+- Follow existing patterns in codebase
+- Suggest running `pnpm db:push` after schema changes
+- Remind to rebuild (`pnpm build`) if types seem stale

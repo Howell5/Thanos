@@ -1,0 +1,2 @@
+# Run file line limit check
+pnpm check:lines

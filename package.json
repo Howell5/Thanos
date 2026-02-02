@@ -1,0 +1,29 @@
+{
+  "name": "morph-template",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "format": "biome format --write .",
+    "check": "biome check --write .",
+    "check:lines": "npx tsx scripts/check-file-lines.ts",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "db:push": "turbo run db:push",
+    "db:studio": "turbo run db:studio",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "husky": "^9.1.7",
+    "tsx": "^4.19.2",
+    "turbo": "^2.3.3"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}
