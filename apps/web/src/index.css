@@ -59,3 +59,14 @@
     @apply bg-background text-foreground antialiased;
   }
 }
+
+/* tldraw vertical toolbar - position to left side, vertically centered */
+.tlui-main-toolbar--vertical {
+  position: fixed !important;
+  left: 16px !important;
+  top: 50% !important;
+  bottom: auto !important;
+  transform: translateY(-50%) !important;
+  z-index: 100 !important;
+  padding-left: 0 !important;
+}
