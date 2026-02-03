@@ -7,7 +7,7 @@ export function PublicLayout() {
   const location = useLocation();
 
   // Landing page has transparent header
-  const isLandingPage = location.pathname === ROUTES.HOME;
+  const isLandingPage = location.pathname === ROUTES.LANDING;
 
   return (
     <div className="min-h-screen bg-background">

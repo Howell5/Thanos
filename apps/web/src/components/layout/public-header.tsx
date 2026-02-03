@@ -52,7 +52,7 @@ export function PublicHeader({ transparent = false }: PublicHeaderProps) {
               <span className="text-sm text-muted-foreground">Loading...</span>
             ) : session ? (
               <Button asChild size="sm">
-                <Link to={ROUTES.DASHBOARD}>Dashboard</Link>
+                <Link to={ROUTES.HOME}>Go to App</Link>
               </Button>
             ) : (
               <Button size="sm" asChild>
@@ -82,7 +82,7 @@ export function PublicHeader({ transparent = false }: PublicHeaderProps) {
                   <span className="text-muted-foreground">Loading...</span>
                 ) : session ? (
                   <Button asChild>
-                    <Link to={ROUTES.DASHBOARD}>Dashboard</Link>
+                    <Link to={ROUTES.HOME}>Go to App</Link>
                   </Button>
                 ) : (
                   <Button asChild>

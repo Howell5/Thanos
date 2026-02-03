@@ -7,16 +7,16 @@ import { queryClient } from "./lib/query-client";
 import { ROUTES } from "./lib/routes";
 
 // Layouts
+import { AppLayout } from "./layouts/app-layout";
 import { CanvasLayout } from "./layouts/canvas-layout";
-import { DashboardLayout } from "./layouts/dashboard-layout";
 import { PublicLayout } from "./layouts/public-layout";
 
-// Dashboard Pages
+// App Pages (protected)
 import { BillingPage } from "./pages/dashboard/billing";
-import { DashboardPage } from "./pages/dashboard/index";
 import { OrdersPage } from "./pages/dashboard/orders";
 import { ProjectsPage } from "./pages/dashboard/projects";
 import { SettingsPage } from "./pages/dashboard/settings";
+import { HomePage } from "./pages/home/index";
 
 // Canvas Pages
 import { CanvasPage } from "./pages/canvas/index";
@@ -33,17 +33,17 @@ function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <Routes>
-          {/* Public routes */}
+          {/* Public routes (marketing / auth) */}
           <Route element={<PublicLayout />}>
-            <Route path={ROUTES.HOME} element={<LandingPage />} />
+            <Route path={ROUTES.LANDING} element={<LandingPage />} />
             <Route path={ROUTES.PRICING} element={<PricingPage />} />
             <Route path={ROUTES.LOGIN} element={<LoginPage />} />
             <Route path={ROUTES.REGISTER} element={<RegisterPage />} />
           </Route>
 
-          {/* Protected routes - Dashboard */}
-          <Route element={<DashboardLayout />}>
-            <Route path={ROUTES.DASHBOARD} element={<DashboardPage />} />
+          {/* Protected routes - App */}
+          <Route element={<AppLayout />}>
+            <Route path={ROUTES.HOME} element={<HomePage />} />
             <Route path={ROUTES.PROJECTS} element={<ProjectsPage />} />
             <Route path={ROUTES.SETTINGS} element={<SettingsPage />} />
             <Route path={ROUTES.BILLING} element={<BillingPage />} />

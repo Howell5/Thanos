@@ -7,8 +7,7 @@ import { useLocation } from "react-router-dom";
 
 export function LoginPage() {
   const location = useLocation();
-  const from =
-    (location.state as { from?: { pathname: string } })?.from?.pathname || ROUTES.DASHBOARD;
+  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || ROUTES.HOME;
 
   const [isLoading, setIsLoading] = useState<"google" | "github" | null>(null);
   const [error, setError] = useState("");

@@ -1,10 +1,10 @@
-import { DashboardHeader } from "@/components/layout/dashboard-header";
-import { DashboardSidebar } from "@/components/layout/dashboard-sidebar";
+import { AppHeader } from "@/components/layout/app-header";
+import { AppSidebar } from "@/components/layout/app-sidebar";
 import { useSession } from "@/lib/auth-client";
 import { ROUTES } from "@/lib/routes";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 
-export function DashboardLayout() {
+export function AppLayout() {
   const { data: session, isPending } = useSession();
   const location = useLocation();
 
@@ -23,14 +23,16 @@ export function DashboardLayout() {
   }
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex h-screen bg-background">
       {/* Sidebar - desktop only */}
-      <DashboardSidebar />
+      <div className="hidden lg:block">
+        <AppSidebar />
+      </div>
 
       {/* Main content area */}
-      <div className="flex flex-1 flex-col">
-        <DashboardHeader />
-        <main className="flex-1 p-4 lg:p-6">
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <AppHeader />
+        <main className="flex-1 overflow-auto">
           <Outlet />
         </main>
       </div>

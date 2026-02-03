@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -25,7 +25,7 @@ import { motion } from "framer-motion";
 import { FolderPlus, Image, MoreVertical, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type { z } from "zod";
 
 const fadeInUp = {
@@ -36,6 +36,7 @@ const fadeInUp = {
 type CreateProjectFormData = z.infer<typeof createProjectSchema>;
 
 export function ProjectsPage() {
+  const navigate = useNavigate();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const { data, isLoading } = useProjects();
   const createProject = useCreateProject();
@@ -52,9 +53,10 @@ export function ProjectsPage() {
 
   const onSubmit = async (data: CreateProjectFormData) => {
     try {
-      await createProject.mutateAsync(data);
+      const project = await createProject.mutateAsync(data);
       setIsCreateDialogOpen(false);
       form.reset();
+      navigate(getCanvasRoute(project.id));
     } catch {
       // Error is handled by the mutation
     }
@@ -71,7 +73,7 @@ export function ProjectsPage() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-5xl px-4 py-8">
       {/* Header */}
       <motion.div
         variants={fadeInUp}
@@ -80,10 +82,7 @@ export function ProjectsPage() {
         transition={{ duration: 0.4 }}
         className="flex items-center justify-between"
       >
-        <div>
-          <h1 className="text-3xl font-bold">Projects</h1>
-          <p className="mt-2 text-muted-foreground">Create and manage your AI canvas projects</p>
-        </div>
+        <h1 className="text-2xl font-bold">All Projects</h1>
 
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
@@ -140,18 +139,19 @@ export function ProjectsPage() {
         initial="initial"
         animate="animate"
         transition={{ duration: 0.4, delay: 0.1 }}
+        className="mt-6"
       >
         {isLoading ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {[...Array(6)].map((_, i) => (
-              <Card key={i} className="h-64 animate-pulse bg-muted" />
+              <Card key={i} className="h-48 animate-pulse bg-muted" />
             ))}
           </div>
         ) : !data?.projects || data.projects.length === 0 ? (
           <Card className="flex flex-col items-center justify-center p-12 text-center">
-            <FolderPlus className="h-12 w-12 text-muted-foreground" />
-            <CardTitle className="mt-4">No projects yet</CardTitle>
-            <CardDescription className="mt-2">
+            <FolderPlus className="h-10 w-10 text-muted-foreground" />
+            <CardTitle className="mt-4 text-lg">No projects yet</CardTitle>
+            <CardDescription className="mt-1">
               Create your first project to start generating AI images
             </CardDescription>
             <Button className="mt-6" onClick={() => setIsCreateDialogOpen(true)}>
@@ -162,68 +162,59 @@ export function ProjectsPage() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {data.projects.map((project) => (
-              <Card
-                key={project.id}
-                className="group relative overflow-hidden transition-colors hover:bg-muted/50"
-              >
-                <Link to={getCanvasRoute(project.id)}>
+              <Link key={project.id} to={getCanvasRoute(project.id)}>
+                <Card className="group overflow-hidden transition-all hover:ring-2 hover:ring-primary/20">
                   {/* Thumbnail */}
-                  <div className="aspect-video bg-muted">
+                  <div className="relative aspect-video bg-muted">
                     {project.images?.[0]?.r2Url ? (
                       <img
                         src={project.images[0].r2Url}
                         alt={project.name}
-                        className="h-full w-full object-cover"
+                        className="h-full w-full object-cover transition-transform group-hover:scale-105"
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center">
-                        <Image className="h-12 w-12 text-muted-foreground/50" />
+                        <Image className="h-8 w-8 text-muted-foreground/50" />
                       </div>
                     )}
+
+                    {/* Actions Dropdown */}
+                    <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="secondary"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={(e) => e.preventDefault()}
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleDelete(project.id);
+                            }}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="line-clamp-1 text-lg">{project.name}</CardTitle>
-                    {project.description && (
-                      <CardDescription className="line-clamp-2">
-                        {project.description}
-                      </CardDescription>
-                    )}
-                  </CardHeader>
-                  <CardContent className="pb-4 pt-0">
-                    <p className="text-xs text-muted-foreground">
-                      Updated {new Date(project.updatedAt).toLocaleDateString()}
+
+                  <CardContent className="p-3">
+                    <p className="line-clamp-1 font-medium">{project.name}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {new Date(project.updatedAt).toLocaleDateString()}
                     </p>
                   </CardContent>
-                </Link>
-
-                {/* Actions Dropdown */}
-                <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="secondary"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={(e) => e.preventDefault()}
-                      >
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        className="text-destructive focus:text-destructive"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          handleDelete(project.id);
-                        }}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </Card>
+                </Card>
+              </Link>
             ))}
           </div>
         )}

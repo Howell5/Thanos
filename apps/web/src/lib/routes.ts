@@ -3,14 +3,14 @@
  * Single source of truth for all application routes
  */
 export const ROUTES = {
-  // Public routes
-  HOME: "/",
+  // Public routes (marketing / auth)
+  LANDING: "/welcome",
   PRICING: "/pricing",
   LOGIN: "/login",
   REGISTER: "/register",
 
-  // Protected routes
-  DASHBOARD: "/dashboard",
+  // Protected routes - App
+  HOME: "/",
   PROJECTS: "/projects",
   CANVAS: "/canvas/:id",
   SETTINGS: "/settings",
