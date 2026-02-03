@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const envSchema = z.object({
-  VITE_API_URL: z.string().url().default("http://localhost:3000"),
+  VITE_API_URL: z.string().url().default("http://localhost:3060"),
   // Development mock session (set to "true" to enable)
   VITE_DEV_MOCK_SESSION: z
     .string()
