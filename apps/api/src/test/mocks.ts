@@ -4,7 +4,7 @@
  */
 
 import type { UploadOptions, UploadResult } from "../lib/r2";
-import type { GenerateImageParams, GenerateImageResult } from "../lib/vertex-ai";
+import type { GenerateImageParams, GenerateImageResult, InpaintImageParams } from "../lib/vertex-ai";
 import type { IR2Service, IVertexAIService } from "../services/types";
 
 /**
@@ -16,6 +16,7 @@ export class MockVertexAIService implements IVertexAIService {
   private _shouldFail = false;
   private _failMessage = "Mock AI generation failed";
   private _generateCalls: GenerateImageParams[] = [];
+  private _inpaintCalls: InpaintImageParams[] = [];
 
   async generateImage(params: GenerateImageParams): Promise<GenerateImageResult> {
     this._generateCalls.push(params);
@@ -37,12 +38,33 @@ export class MockVertexAIService implements IVertexAIService {
     };
   }
 
+  async inpaintImage(params: InpaintImageParams): Promise<GenerateImageResult> {
+    this._inpaintCalls.push(params);
+
+    if (this._shouldFail) {
+      throw new Error(this._failMessage);
+    }
+
+    // Return a mock inpainted image result
+    return {
+      imageData: Buffer.from("mock-inpainted-image-data"),
+      width: 1024,
+      height: 1024,
+      mimeType: "image/png",
+      durationMs: 1500,
+    };
+  }
+
   estimateCredits(params: GenerateImageParams): number {
     const model = params.model || "imagen-3.0-generate-001";
     if (model.includes("fast")) {
       return 50;
     }
     return 100;
+  }
+
+  estimateInpaintCredits(): number {
+    return 120;
   }
 
   isConfigured(): boolean {
@@ -65,11 +87,16 @@ export class MockVertexAIService implements IVertexAIService {
     return this._generateCalls;
   }
 
+  getInpaintCalls(): InpaintImageParams[] {
+    return this._inpaintCalls;
+  }
+
   reset(): void {
     this._isConfigured = true;
     this._shouldFail = false;
     this._failMessage = "Mock AI generation failed";
     this._generateCalls = [];
+    this._inpaintCalls = [];
   }
 
   private getDimensions(aspectRatio: string): { width: number; height: number } {

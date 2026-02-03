@@ -42,6 +42,15 @@ export const ASPECT_RATIOS: readonly { value: AspectRatio; label: string; descri
 
 export const DEFAULT_ASPECT_RATIO: AspectRatio = "1:1";
 
+// Edit mode for inpainting/outpainting
+export type EditMode = "normal" | "inpaint" | "outpaint";
+
+// Inpainting target info
+export interface InpaintTarget {
+  shapeId: string;
+  imageData: string; // base64 of the original image
+}
+
 // Generating task info
 export interface GeneratingTask {
   id: string;
@@ -72,6 +81,10 @@ interface AIStore {
   aspectRatio: AspectRatio;
   // Project context
   projectId: string | null;
+  // Edit mode state
+  editMode: EditMode;
+  inpaintTarget: InpaintTarget | null;
+  isInpainting: boolean;
 
   // Computed
   isGenerating: boolean;
@@ -86,11 +99,18 @@ interface AIStore {
   startGenerating: (taskId: string, shapeId: string, prompt: string) => void;
   completeGenerating: (taskId: string, imageUrl: string, imageId: string) => void;
   failGenerating: (taskId: string, error: string) => void;
-  generateImage: (prompt: string) => Promise<{
+  generateImage: (
+    prompt: string,
+    referenceImages?: string[],
+  ) => Promise<{
     taskId: string;
     imageUrl: string;
     imageId: string;
   }>;
+  // Inpainting actions
+  enterInpaintMode: (shapeId: string, imageData: string) => void;
+  exitInpaintMode: () => void;
+  inpaintImage: (maskData: string, prompt: string) => Promise<{ imageUrl: string; imageId: string }>;
   clearError: () => void;
   clearHistory: () => void;
 }
@@ -104,6 +124,10 @@ export const useAIStore = create<AIStore>((set, get) => ({
   currentModel: DEFAULT_MODEL,
   aspectRatio: DEFAULT_ASPECT_RATIO,
   projectId: null,
+  // Edit mode state
+  editMode: "normal",
+  inpaintTarget: null,
+  isInpainting: false,
 
   // Computed getters (will be updated when tasks change)
   get isGenerating() {
@@ -195,7 +219,8 @@ export const useAIStore = create<AIStore>((set, get) => ({
   },
 
   // Generate image via berryon API
-  generateImage: async (prompt: string) => {
+  // Supports both text-to-image and image-to-image (with referenceImages)
+  generateImage: async (prompt: string, referenceImages?: string[]) => {
     const { currentModel, aspectRatio, canStartNewTask, projectId } = get();
 
     if (!projectId) {
@@ -216,6 +241,7 @@ export const useAIStore = create<AIStore>((set, get) => ({
           prompt,
           model: currentModel.id,
           aspectRatio,
+          referenceImages,
         },
       });
 
@@ -238,6 +264,67 @@ export const useAIStore = create<AIStore>((set, get) => ({
             ? error.message
             : "生成失败，请重试";
       throw new Error(errorMessage);
+    }
+  },
+
+  // Enter inpaint mode for a specific image
+  enterInpaintMode: (shapeId: string, imageData: string) => {
+    set({
+      editMode: "inpaint",
+      inpaintTarget: { shapeId, imageData },
+    });
+  },
+
+  // Exit inpaint mode
+  exitInpaintMode: () => {
+    set({
+      editMode: "normal",
+      inpaintTarget: null,
+    });
+  },
+
+  // Inpaint image via berryon API
+  inpaintImage: async (maskData: string, prompt: string) => {
+    const { projectId, inpaintTarget } = get();
+
+    if (!projectId) {
+      throw new Error("未设置项目 ID");
+    }
+
+    if (!inpaintTarget) {
+      throw new Error("未选择要编辑的图片");
+    }
+
+    set({ isInpainting: true });
+
+    try {
+      const response = await api.api["ai-images"].inpaint.$post({
+        json: {
+          projectId,
+          prompt,
+          imageData: inpaintTarget.imageData,
+          maskData,
+        },
+      });
+
+      const json = await response.json();
+      if (!json.success) {
+        throw new Error("Failed to inpaint image");
+      }
+
+      const { image } = json.data;
+      return { imageUrl: image.r2Url, imageId: image.id };
+    } catch (error) {
+      console.error("Inpainting error:", error);
+      const errorMessage =
+        error instanceof ApiError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "局部重绘失败，请重试";
+      throw new Error(errorMessage);
+    } finally {
+      set({ isInpainting: false });
     }
   },
 

@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { BottomPromptPanel } from "./bottom-prompt-panel";
 import { FloatingToolbar } from "./floating-toolbar";
 import { GeneratingOverlay } from "./generating-overlay";
+import { InpaintingOverlay } from "./inpainting-overlay";
 
 interface TldrawCanvasProps {
   projectId: string;
@@ -88,8 +89,10 @@ function InFrontOfTheCanvas() {
       <FloatingToolbar />
       <BottomPromptPanel />
       <GeneratingOverlay />
+      <InpaintingOverlay />
       {/* Top Bar - positioned at top left */}
-      <div className="fixed left-4 top-4 z-[300] flex items-center gap-2">
+      {/* Note: pointer-events-auto is needed because tldraw's InFrontOfTheCanvas has pointer-events: none */}
+      <div className="pointer-events-auto fixed left-4 top-4 z-[300] flex items-center gap-2">
         <Button
           asChild
           variant="outline"

@@ -4,14 +4,20 @@
  */
 
 import type { UploadOptions, UploadResult } from "../lib/r2";
-import type { GenerateImageParams, GenerateImageResult } from "../lib/vertex-ai";
+import type {
+  GenerateImageParams,
+  GenerateImageResult,
+  InpaintImageParams,
+} from "../lib/vertex-ai";
 
 /**
  * Vertex AI Service Interface
  */
 export interface IVertexAIService {
   generateImage(params: GenerateImageParams): Promise<GenerateImageResult>;
+  inpaintImage(params: InpaintImageParams): Promise<GenerateImageResult>;
   estimateCredits(params: GenerateImageParams): number;
+  estimateInpaintCredits(): number;
   isConfigured(): boolean;
 }
 

@@ -15,86 +15,11 @@ import type { AspectRatio } from "@repo/shared";
 import { AlertCircle, ArrowRight, Check, ChevronDown, Loader2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type TLImageShape, useEditor } from "tldraw";
+import { Dropdown } from "./dropdown";
 
 interface SelectedImage {
   id: string;
   src: string;
-}
-
-// Dropdown component for selecting options
-function Dropdown<T extends string>({
-  value,
-  options,
-  onChange,
-  disabled,
-  renderLabel,
-}: {
-  value: T;
-  options: readonly { value: T; label: string; description?: string }[];
-  onChange: (value: T) => void;
-  disabled?: boolean;
-  renderLabel?: (option: { value: T; label: string; description?: string }) => React.ReactNode;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const selectedOption = options.find((o) => o.value === value);
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        disabled={disabled}
-        className="flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        <span>{selectedOption?.label || value}</span>
-        <ChevronDown className="h-3.5 w-3.5" />
-      </button>
-
-      {isOpen && (
-        <div className="absolute bottom-full left-0 z-50 mb-2 min-w-[140px] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
-          <div className="max-h-[240px] overflow-y-auto py-1">
-            {options.map((option) => (
-              <button
-                key={option.value}
-                onClick={() => {
-                  onChange(option.value);
-                  setIsOpen(false);
-                }}
-                className={`flex w-full items-center gap-2 px-3 py-2 transition-colors hover:bg-gray-50 ${
-                  value === option.value ? "bg-purple-50" : ""
-                }`}
-              >
-                <div className="flex-1 text-left">
-                  {renderLabel ? (
-                    renderLabel(option)
-                  ) : (
-                    <>
-                      <div className="text-sm text-gray-800">{option.label}</div>
-                      {option.description && (
-                        <div className="text-xs text-gray-500">{option.description}</div>
-                      )}
-                    </>
-                  )}
-                </div>
-                {value === option.value && <Check className="h-4 w-4 text-purple-600" />}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 
 export function BottomPromptPanel() {
@@ -111,6 +36,11 @@ export function BottomPromptPanel() {
     setCurrentModel,
     aspectRatio,
     setAspectRatio,
+    editMode,
+    inpaintTarget,
+    exitInpaintMode,
+    inpaintImage,
+    isInpainting,
   } = useAIStore();
   const [showModelPicker, setShowModelPicker] = useState(false);
   const modelPickerRef = useRef<HTMLDivElement>(null);
@@ -218,9 +148,14 @@ export function BottomPromptPanel() {
     // Clear prompt immediately so user can start typing next one
     setPrompt("");
 
+    // Get reference images (base64 data) for image-to-image generation
+    const referenceImages =
+      selectedImages.length > 0 ? selectedImages.map((img) => img.src) : undefined;
+
     try {
       // Generate image (this runs in background)
-      const { imageUrl, imageId } = await generateImage(currentPrompt);
+      // Pass reference images if any are selected
+      const { imageUrl, imageId } = await generateImage(currentPrompt, referenceImages);
 
       // Update placeholder with real image
       await updatePlaceholderWithImage(editor, shapeId, imageUrl, imageId);
@@ -239,10 +174,52 @@ export function BottomPromptPanel() {
     }
   };
 
+  // Handle inpaint generation
+  const handleInpaint = async () => {
+    if (!prompt.trim() || !inpaintTarget || isInpainting) return;
+
+    const currentPrompt = prompt.trim();
+
+    // Get mask from the InpaintingOverlay
+    const exportMask = (window as unknown as { __exportInpaintMask?: () => string })
+      .__exportInpaintMask;
+    if (!exportMask) {
+      console.error("Mask export function not found");
+      return;
+    }
+
+    const maskData = exportMask();
+    if (!maskData) {
+      alert("请先在图片上绘制需要重绘的区域");
+      return;
+    }
+
+    // Clear prompt immediately
+    setPrompt("");
+
+    try {
+      const { imageUrl, imageId } = await inpaintImage(maskData, currentPrompt);
+
+      // Update the original image shape with the new inpainted image
+      await updatePlaceholderWithImage(editor, inpaintTarget.shapeId, imageUrl, imageId);
+
+      // Exit inpaint mode
+      exitInpaintMode();
+    } catch (err) {
+      console.error("Failed to inpaint image:", err);
+      const errorMessage = err instanceof Error ? err.message : "局部重绘失败";
+      failGenerating("inpaint", errorMessage);
+    }
+  };
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleGenerate();
+      if (editMode === "inpaint") {
+        handleInpaint();
+      } else {
+        handleGenerate();
+      }
     }
   };
 
@@ -271,8 +248,9 @@ export function BottomPromptPanel() {
   }, []);
 
   // Position at bottom center
+  // Note: pointer-events-auto is needed because tldraw's InFrontOfTheCanvas has pointer-events: none
   return (
-    <div className="fixed bottom-6 left-1/2 z-[200] -translate-x-1/2 transform">
+    <div className="pointer-events-auto fixed bottom-6 left-1/2 z-[200] -translate-x-1/2 transform">
       {/* Error Toast */}
       {error && (
         <div className="absolute bottom-full left-1/2 mb-3 w-[500px] max-w-full -translate-x-1/2 transform">
@@ -326,6 +304,15 @@ export function BottomPromptPanel() {
           </div>
         )}
 
+        {/* Inpainting Mode Indicator */}
+        {editMode === "inpaint" && (
+          <div className="border-b border-purple-100 bg-purple-50 px-5 py-2">
+            <p className="text-sm text-purple-700">
+              🎨 局部重绘模式 - 在图片上绘制需要重绘的区域，然后输入描述
+            </p>
+          </div>
+        )}
+
         {/* Input Area */}
         <div className="px-5 py-4">
           <textarea
@@ -333,7 +320,11 @@ export function BottomPromptPanel() {
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={handleKeyPress}
             placeholder={
-              selectedImages.length > 0 ? "描述你想要的变化..." : "描述你想要生成的图片..."
+              editMode === "inpaint"
+                ? "描述你想要在选定区域生成的内容..."
+                : selectedImages.length > 0
+                  ? "描述你想要的变化..."
+                  : "描述你想要生成的图片..."
             }
             className="w-full resize-none border-none bg-transparent text-base leading-relaxed placeholder-gray-400 outline-none"
             rows={2}
@@ -413,25 +404,47 @@ export function BottomPromptPanel() {
           {/* Right: Status + Generate Button */}
           <div className="flex items-center gap-3">
             {/* Status */}
-            {generatingCount > 0 ? (
+            {isInpainting ? (
+              <p className="text-sm text-gray-500">正在重绘...</p>
+            ) : generatingCount > 0 ? (
               <p className="text-sm text-gray-500">正在生成 {generatingCount} 张图片...</p>
+            ) : editMode === "inpaint" ? (
+              <p className="text-sm text-purple-600">绘制区域后输入描述</p>
             ) : selectedImages.length > 0 ? (
               <p className="text-sm text-gray-500">已选择 {selectedImages.length} 张参考图</p>
             ) : null}
 
-            {/* Generate Button */}
-            <button
-              onClick={handleGenerate}
-              disabled={!prompt.trim() || !canStartNewTask}
-              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-purple-600 text-white transition-colors hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-300"
-              title={!canStartNewTask ? `最多同时生成 ${MAX_CONCURRENT_TASKS} 张图片` : "生成"}
-            >
-              {generatingCount > 0 ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <ArrowRight className="h-5 w-5" />
-              )}
-            </button>
+            {/* Generate/Inpaint Button */}
+            {editMode === "inpaint" ? (
+              <button
+                onClick={handleInpaint}
+                disabled={!prompt.trim() || isInpainting}
+                className="flex h-10 flex-shrink-0 items-center gap-2 rounded-xl bg-purple-600 px-4 text-white transition-colors hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                title="开始重绘"
+              >
+                {isInpainting ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <>
+                    <ArrowRight className="h-5 w-5" />
+                    <span className="text-sm font-medium">重绘</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                onClick={handleGenerate}
+                disabled={!prompt.trim() || !canStartNewTask}
+                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-purple-600 text-white transition-colors hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                title={!canStartNewTask ? `最多同时生成 ${MAX_CONCURRENT_TASKS} 张图片` : "生成"}
+              >
+                {generatingCount > 0 ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <ArrowRight className="h-5 w-5" />
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>

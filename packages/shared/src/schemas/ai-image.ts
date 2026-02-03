@@ -14,8 +14,15 @@ export type AspectRatio = z.infer<typeof aspectRatioSchema>;
 
 /**
  * Supported AI models
+ * - imagen-3.0-generate-001: High quality text-to-image
+ * - imagen-3.0-fast-001: Faster generation, lower quality
+ * - imagen-3.0-capability-001: Supports editing (inpainting, outpainting, image-to-image)
  */
-export const aiModelSchema = z.enum(["imagen-3.0-generate-001", "imagen-3.0-fast-001"]);
+export const aiModelSchema = z.enum([
+  "imagen-3.0-generate-001",
+  "imagen-3.0-fast-001",
+  "imagen-3.0-capability-001",
+]);
 
 export type AIModel = z.infer<typeof aiModelSchema>;
 
@@ -28,6 +35,11 @@ export const generateImageSchema = z.object({
   negativePrompt: z.string().max(2000).optional(),
   aspectRatio: aspectRatioSchema.default("1:1"),
   model: aiModelSchema.default("imagen-3.0-generate-001"),
+  // Reference images for image-to-image generation (base64 strings, max 4)
+  referenceImages: z
+    .array(z.string().min(1))
+    .max(4, "Maximum 4 reference images allowed")
+    .optional(),
 });
 
 export type GenerateImage = z.infer<typeof generateImageSchema>;
@@ -42,6 +54,40 @@ export const generationHistorySchema = z.object({
 });
 
 export type GenerationHistory = z.infer<typeof generationHistorySchema>;
+
+/**
+ * Schema for inpainting an image
+ * Inpainting replaces a masked region of an image with AI-generated content
+ */
+export const inpaintImageSchema = z.object({
+  projectId: z.string().uuid(),
+  prompt: z.string().min(1, "Prompt is required").max(2000),
+  // Original image data (base64 string)
+  imageData: z.string().min(1, "Image data is required"),
+  // Mask data (base64 string) - white pixels indicate areas to regenerate
+  maskData: z.string().min(1, "Mask data is required"),
+});
+
+export type InpaintImage = z.infer<typeof inpaintImageSchema>;
+
+/**
+ * Schema for outpainting an image
+ * Outpainting extends an image beyond its original boundaries
+ */
+export const outpaintDirectionSchema = z.enum(["top", "bottom", "left", "right", "all"]);
+
+export type OutpaintDirection = z.infer<typeof outpaintDirectionSchema>;
+
+export const outpaintImageSchema = z.object({
+  projectId: z.string().uuid(),
+  prompt: z.string().min(1, "Prompt is required").max(2000),
+  // Original image data (base64 string)
+  imageData: z.string().min(1, "Image data is required"),
+  // Direction to extend the image
+  direction: outpaintDirectionSchema,
+});
+
+export type OutpaintImage = z.infer<typeof outpaintImageSchema>;
 
 /**
  * AI image response type (for frontend display)

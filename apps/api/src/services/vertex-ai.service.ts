@@ -6,8 +6,11 @@
 import {
   type GenerateImageParams,
   type GenerateImageResult,
+  type InpaintImageParams,
   estimateCredits,
+  estimateInpaintCredits,
   generateAIImage,
+  inpaintAIImage,
   isVertexAIConfigured,
 } from "../lib/vertex-ai";
 import type { IVertexAIService } from "./types";
@@ -20,8 +23,16 @@ export class VertexAIService implements IVertexAIService {
     return generateAIImage(params);
   }
 
+  async inpaintImage(params: InpaintImageParams): Promise<GenerateImageResult> {
+    return inpaintAIImage(params);
+  }
+
   estimateCredits(params: GenerateImageParams): number {
     return estimateCredits(params);
+  }
+
+  estimateInpaintCredits(): number {
+    return estimateInpaintCredits();
   }
 
   isConfigured(): boolean {

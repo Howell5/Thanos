@@ -1,5 +1,6 @@
 import type { ImageMeta } from "@/lib/image-assets";
-import { Copy, Download, Info } from "lucide-react";
+import { useAIStore } from "@/stores/use-ai-store";
+import { Copy, Download, Info, Paintbrush } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type TLImageShape, type TLShapeId, createShapeId, useEditor } from "tldraw";
 
@@ -19,6 +20,7 @@ function formatRelativeTime(timestamp: number): string {
 
 export function FloatingToolbar() {
   const editor = useEditor();
+  const { editMode, enterInpaintMode } = useAIStore();
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [toolbarPosition, setToolbarPosition] = useState<{ x: number; y: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -172,16 +174,33 @@ export function FloatingToolbar() {
     }
   };
 
-  // Hide toolbar when no image selected, no position, or during drag
-  if (!selectedImageId || !toolbarPosition || isDragging) {
+  // Handle inpaint button click
+  const handleInpaint = () => {
+    const dataUrl = getSelectedImageDataUrl();
+    if (!dataUrl || !selectedImageId) return;
+
+    // Check if this is a generating placeholder
+    const meta = getSelectedImageMeta();
+    if (meta?.source === "generating") {
+      alert("请等待图片生成完成");
+      return;
+    }
+
+    // Enter inpaint mode with the selected image
+    enterInpaintMode(selectedImageId, dataUrl);
+  };
+
+  // Hide toolbar when no image selected, no position, during drag, or in edit mode
+  if (!selectedImageId || !toolbarPosition || isDragging || editMode !== "normal") {
     return null;
   }
 
   const meta = getSelectedImageMeta();
 
+  // Note: pointer-events-auto is needed because tldraw's InFrontOfTheCanvas has pointer-events: none
   return (
     <div
-      className="fixed z-50 flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-1.5 shadow-lg"
+      className="pointer-events-auto fixed z-50 flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-1.5 shadow-lg"
       style={{
         left: toolbarPosition.x,
         top: toolbarPosition.y,
@@ -206,6 +225,19 @@ export function FloatingToolbar() {
       >
         <Download className="h-4 w-4" />
         <span>下载</span>
+      </button>
+
+      {/* Divider */}
+      <div className="mx-1 h-6 w-px bg-gray-200" />
+
+      {/* Inpaint */}
+      <button
+        onClick={handleInpaint}
+        className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
+        title="局部重绘"
+      >
+        <Paintbrush className="h-4 w-4" />
+        <span>局部重绘</span>
       </button>
 
       {/* Divider */}
