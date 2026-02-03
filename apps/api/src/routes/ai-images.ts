@@ -5,14 +5,15 @@ import { Hono } from "hono";
 import { auth } from "../auth";
 import { db } from "../db";
 import { aiImages, aiUsageHistory, projects, user } from "../db/schema";
-import { generateImageKey, uploadToR2 } from "../lib/r2";
+import type { UploadResult } from "../lib/r2";
 import {
   AI_GENERATION_LIMIT,
   checkRateLimit,
   getAIGenerationRateLimitKey,
 } from "../lib/rate-limit";
 import { err, errors, ok } from "../lib/response";
-import { estimateCredits, generateAIImage, isVertexAIConfigured } from "../lib/vertex-ai";
+import type { GenerateImageResult } from "../lib/vertex-ai";
+import "../services/types"; // Import type augmentation
 
 const aiImagesRoute = new Hono()
   /**
@@ -25,8 +26,12 @@ const aiImagesRoute = new Hono()
       return errors.unauthorized(c);
     }
 
+    // Get services from context
+    const vertexService = c.var.vertexService;
+    const r2Service = c.var.r2Service;
+
     // Check if Vertex AI is configured
-    if (!isVertexAIConfigured()) {
+    if (!vertexService.isConfigured()) {
       return errors.serviceUnavailable(c, "AI image generation is not configured");
     }
 
@@ -64,7 +69,7 @@ const aiImagesRoute = new Hono()
       columns: { credits: true },
     });
 
-    const creditsRequired = estimateCredits({ prompt, model });
+    const creditsRequired = vertexService.estimateCredits({ prompt, model });
 
     if (!userRecord || userRecord.credits < creditsRequired) {
       return err(c, 402, "Insufficient credits to generate image", "INSUFFICIENT_CREDITS");
@@ -72,11 +77,11 @@ const aiImagesRoute = new Hono()
 
     // Generate image using Vertex AI
     const startTime = Date.now();
-    let generateResult;
+    let generateResult: GenerateImageResult;
     let errorMessage: string | undefined;
 
     try {
-      generateResult = await generateAIImage({
+      generateResult = await vertexService.generateImage({
         prompt,
         negativePrompt,
         model,
@@ -103,11 +108,11 @@ const aiImagesRoute = new Hono()
     }
 
     // Upload to R2
-    const imageKey = generateImageKey(session.user.id, projectId);
-    let uploadResult;
+    const imageKey = r2Service.generateImageKey(session.user.id, projectId);
+    let uploadResult: UploadResult;
 
     try {
-      uploadResult = await uploadToR2({
+      uploadResult = await r2Service.upload({
         key: imageKey,
         data: generateResult.imageData,
         contentType: generateResult.mimeType,

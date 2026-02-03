@@ -40,6 +40,7 @@ import { logger } from "hono/logger";
 import { auth } from "./auth";
 import { checkDatabaseHealth, closeDatabase } from "./db";
 import { validateEnv } from "./env";
+import { servicesMiddleware } from "./middleware/services";
 import aiImagesRoute from "./routes/ai-images";
 import checkoutRoute from "./routes/checkout";
 import ordersRoute from "./routes/orders";
@@ -107,6 +108,9 @@ baseApp.use(
 baseApp.on(["POST", "GET"], "/api/auth/*", (c) => {
   return auth.handler(c.req.raw);
 });
+
+// Inject services into context for dependency injection
+baseApp.use("*", servicesMiddleware());
 
 /**
  * Main Hono application with chained routes for RPC type inference
