@@ -1,7 +1,7 @@
 import { Logo } from "@/components/common/logo";
 import { ROUTES } from "@/lib/routes";
 import { cn } from "@/lib/utils";
-import { CreditCard, LayoutDashboard, Receipt, Settings } from "lucide-react";
+import { CreditCard, FolderKanban, LayoutDashboard, Receipt, Settings } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 const navItems = [
@@ -9,6 +9,11 @@ const navItems = [
     title: "Dashboard",
     href: ROUTES.DASHBOARD,
     icon: LayoutDashboard,
+  },
+  {
+    title: "Projects",
+    href: ROUTES.PROJECTS,
+    icon: FolderKanban,
   },
   {
     title: "Orders",

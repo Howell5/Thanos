@@ -40,9 +40,11 @@ import { logger } from "hono/logger";
 import { auth } from "./auth";
 import { checkDatabaseHealth, closeDatabase } from "./db";
 import { validateEnv } from "./env";
+import aiImagesRoute from "./routes/ai-images";
 import checkoutRoute from "./routes/checkout";
 import ordersRoute from "./routes/orders";
 import postsRoute from "./routes/posts";
+import projectsRoute from "./routes/projects";
 import userRoute from "./routes/user";
 import webhooksRoute from "./routes/webhooks";
 
@@ -116,7 +118,7 @@ let isShuttingDown = false;
 const app = baseApp
   .get("/", (c) => {
     return c.json({
-      message: "Morph Template API",
+      message: "Berryon API",
       version: "1.0.0",
     });
   })
@@ -131,6 +133,8 @@ const app = baseApp
     return c.json({ status: dbHealth.healthy ? "ok" : "degraded" }, dbHealth.healthy ? 200 : 503);
   })
   .route("/api/posts", postsRoute)
+  .route("/api/projects", projectsRoute)
+  .route("/api/ai-images", aiImagesRoute)
   .route("/api/checkout", checkoutRoute)
   .route("/api/orders", ordersRoute)
   .route("/api/webhooks", webhooksRoute)

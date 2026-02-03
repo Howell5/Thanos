@@ -11,9 +11,18 @@ export const ROUTES = {
 
   // Protected routes
   DASHBOARD: "/dashboard",
+  PROJECTS: "/projects",
+  CANVAS: "/canvas/:id",
   SETTINGS: "/settings",
   BILLING: "/settings/billing",
   ORDERS: "/orders",
 } as const;
 
 export type RoutePath = (typeof ROUTES)[keyof typeof ROUTES];
+
+/**
+ * Helper to generate canvas route with project ID
+ */
+export function getCanvasRoute(projectId: string): string {
+  return `/canvas/${projectId}`;
+}

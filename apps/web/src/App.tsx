@@ -6,15 +6,22 @@ import { ErrorBoundary } from "./components/error-boundary";
 import { queryClient } from "./lib/query-client";
 import { ROUTES } from "./lib/routes";
 
-import { DashboardLayout } from "./layouts/dashboard-layout";
 // Layouts
+import { CanvasLayout } from "./layouts/canvas-layout";
+import { DashboardLayout } from "./layouts/dashboard-layout";
 import { PublicLayout } from "./layouts/public-layout";
 
+// Dashboard Pages
 import { BillingPage } from "./pages/dashboard/billing";
 import { DashboardPage } from "./pages/dashboard/index";
 import { OrdersPage } from "./pages/dashboard/orders";
+import { ProjectsPage } from "./pages/dashboard/projects";
 import { SettingsPage } from "./pages/dashboard/settings";
-// Pages
+
+// Canvas Pages
+import { CanvasPage } from "./pages/canvas/index";
+
+// Public Pages
 import { LandingPage } from "./pages/landing";
 import { LoginPage } from "./pages/login";
 import { NotFoundPage } from "./pages/not-found";
@@ -34,12 +41,18 @@ function App() {
             <Route path={ROUTES.REGISTER} element={<RegisterPage />} />
           </Route>
 
-          {/* Protected routes */}
+          {/* Protected routes - Dashboard */}
           <Route element={<DashboardLayout />}>
             <Route path={ROUTES.DASHBOARD} element={<DashboardPage />} />
+            <Route path={ROUTES.PROJECTS} element={<ProjectsPage />} />
             <Route path={ROUTES.SETTINGS} element={<SettingsPage />} />
             <Route path={ROUTES.BILLING} element={<BillingPage />} />
             <Route path={ROUTES.ORDERS} element={<OrdersPage />} />
+          </Route>
+
+          {/* Protected routes - Canvas (full screen) */}
+          <Route element={<CanvasLayout />}>
+            <Route path={ROUTES.CANVAS} element={<CanvasPage />} />
           </Route>
 
           {/* 404 */}

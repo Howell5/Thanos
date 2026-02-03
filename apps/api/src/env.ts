@@ -15,6 +15,20 @@ const envSchema = z.object({
   // Stripe keys are optional in development, required in production
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  // Development mock session (only works when NODE_ENV=development)
+  DEV_MOCK_SESSION: z
+    .string()
+    .transform((v) => v === "true" || v === "1")
+    .default("false"),
+  // Vertex AI configuration
+  GOOGLE_CLOUD_PROJECT: z.string().optional(),
+  GOOGLE_CLOUD_LOCATION: z.string().default("us-central1"),
+  // Cloudflare R2 configuration
+  R2_ENDPOINT: z.string().url().optional(),
+  R2_ACCESS_KEY_ID: z.string().optional(),
+  R2_SECRET_ACCESS_KEY: z.string().optional(),
+  R2_BUCKET: z.string().default("berryon-images"),
+  R2_PUBLIC_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
