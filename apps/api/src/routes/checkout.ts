@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { createCheckoutSchema, getCreditPackage } from "@repo/shared";
 import { Hono } from "hono";
-import { auth } from "../auth";
+import { getSessionOrMock } from "../lib/mock-session";
 import { errors, ok } from "../lib/response";
 import { getStripe } from "../lib/stripe";
 
@@ -20,7 +20,7 @@ const checkoutRoute = new Hono()
     }
 
     // Authentication check
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionOrMock(c);
     if (!session) {
       return errors.unauthorized(c);
     }

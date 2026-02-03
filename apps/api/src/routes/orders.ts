@@ -2,9 +2,9 @@ import { zValidator } from "@hono/zod-validator";
 import { ordersQuerySchema } from "@repo/shared";
 import { count, eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { auth } from "../auth";
 import { db } from "../db";
 import { orders } from "../db/schema";
+import { getSessionOrMock } from "../lib/mock-session";
 import { errors, ok } from "../lib/response";
 
 const ordersRoute = new Hono()
@@ -14,7 +14,7 @@ const ordersRoute = new Hono()
    */
   .get("/", zValidator("query", ordersQuerySchema), async (c) => {
     // Authentication check
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionOrMock(c);
     if (!session) {
       return errors.unauthorized(c);
     }

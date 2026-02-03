@@ -2,9 +2,9 @@ import { zValidator } from "@hono/zod-validator";
 import { createPostSchema, paginationSchema, postIdSchema, updatePostSchema } from "@repo/shared";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { auth } from "../auth";
 import { db } from "../db";
 import { posts } from "../db/schema";
+import { getSessionOrMock } from "../lib/mock-session";
 import { errors, ok } from "../lib/response";
 
 const postsRoute = new Hono()
@@ -70,7 +70,7 @@ const postsRoute = new Hono()
    */
   .post("/", zValidator("json", createPostSchema), async (c) => {
     // Check authentication
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionOrMock(c);
     if (!session) {
       return errors.unauthorized(c);
     }
@@ -99,7 +99,7 @@ const postsRoute = new Hono()
     zValidator("json", updatePostSchema),
     async (c) => {
       // Check authentication
-      const session = await auth.api.getSession({ headers: c.req.raw.headers });
+      const session = await getSessionOrMock(c);
       if (!session) {
         return errors.unauthorized(c);
       }
@@ -139,7 +139,7 @@ const postsRoute = new Hono()
    */
   .delete("/:id", zValidator("param", postIdSchema), async (c) => {
     // Check authentication
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionOrMock(c);
     if (!session) {
       return errors.unauthorized(c);
     }

@@ -2,9 +2,9 @@ import { zValidator } from "@hono/zod-validator";
 import { generateImageSchema, generationHistorySchema, projectIdSchema } from "@repo/shared";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
-import { auth } from "../auth";
 import { db } from "../db";
 import { aiImages, aiUsageHistory, projects, user } from "../db/schema";
+import { getSessionOrMock } from "../lib/mock-session";
 import type { UploadResult } from "../lib/r2";
 import {
   AI_GENERATION_LIMIT,
@@ -21,7 +21,7 @@ const aiImagesRoute = new Hono()
    * Generate an AI image and add to project
    */
   .post("/generate", zValidator("json", generateImageSchema), async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionOrMock(c);
     if (!session) {
       return errors.unauthorized(c);
     }
@@ -208,7 +208,7 @@ const aiImagesRoute = new Hono()
     zValidator("param", projectIdSchema),
     zValidator("query", generationHistorySchema),
     async (c) => {
-      const session = await auth.api.getSession({ headers: c.req.raw.headers });
+      const session = await getSessionOrMock(c);
       if (!session) {
         return errors.unauthorized(c);
       }
@@ -250,7 +250,7 @@ const aiImagesRoute = new Hono()
    * Get user's generation history across all projects
    */
   .get("/history", zValidator("query", generationHistorySchema), async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionOrMock(c);
     if (!session) {
       return errors.unauthorized(c);
     }

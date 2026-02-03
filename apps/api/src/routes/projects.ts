@@ -7,9 +7,9 @@ import {
 } from "@repo/shared";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
-import { auth } from "../auth";
 import { db } from "../db";
 import { projects } from "../db/schema";
+import { getSessionOrMock } from "../lib/mock-session";
 import { errors, ok } from "../lib/response";
 
 const projectsRoute = new Hono()
@@ -18,7 +18,7 @@ const projectsRoute = new Hono()
    * List user's projects with pagination
    */
   .get("/", zValidator("query", paginationSchema), async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionOrMock(c);
     if (!session) {
       return errors.unauthorized(c);
     }
@@ -50,7 +50,7 @@ const projectsRoute = new Hono()
    * Get project details with full canvas data and recent images
    */
   .get("/:id", zValidator("param", projectIdSchema), async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionOrMock(c);
     if (!session) {
       return errors.unauthorized(c);
     }
@@ -84,7 +84,7 @@ const projectsRoute = new Hono()
    * Create a new project
    */
   .post("/", zValidator("json", createProjectSchema), async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionOrMock(c);
     if (!session) {
       return errors.unauthorized(c);
     }
@@ -112,7 +112,7 @@ const projectsRoute = new Hono()
     zValidator("param", projectIdSchema),
     zValidator("json", updateProjectSchema),
     async (c) => {
-      const session = await auth.api.getSession({ headers: c.req.raw.headers });
+      const session = await getSessionOrMock(c);
       if (!session) {
         return errors.unauthorized(c);
       }
@@ -150,7 +150,7 @@ const projectsRoute = new Hono()
    * Soft delete a project
    */
   .delete("/:id", zValidator("param", projectIdSchema), async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionOrMock(c);
     if (!session) {
       return errors.unauthorized(c);
     }

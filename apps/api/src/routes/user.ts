@@ -2,9 +2,9 @@ import { zValidator } from "@hono/zod-validator";
 import { updateUserSchema } from "@repo/shared";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { auth } from "../auth";
 import { db } from "../db";
 import { user } from "../db/schema";
+import { getSessionOrMock } from "../lib/mock-session";
 import { errors, ok } from "../lib/response";
 
 const userRoute = new Hono()
@@ -13,7 +13,7 @@ const userRoute = new Hono()
    * Get current user's profile including credits
    */
   .get("/me", async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionOrMock(c);
     if (!session) {
       return errors.unauthorized(c);
     }
@@ -40,7 +40,7 @@ const userRoute = new Hono()
    * Update current user's profile
    */
   .patch("/me", zValidator("json", updateUserSchema), async (c) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionOrMock(c);
     if (!session) {
       return errors.unauthorized(c);
     }
