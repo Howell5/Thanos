@@ -41,6 +41,7 @@ import { auth } from "./auth";
 import { checkDatabaseHealth, closeDatabase } from "./db";
 import { validateEnv } from "./env";
 import { servicesMiddleware } from "./middleware/services";
+import agentRoute from "./routes/agent";
 import aiImagesRoute from "./routes/ai-images/index";
 import checkoutRoute from "./routes/checkout";
 import ordersRoute from "./routes/orders";
@@ -142,7 +143,8 @@ const app = baseApp
   .route("/api/checkout", checkoutRoute)
   .route("/api/orders", ordersRoute)
   .route("/api/webhooks", webhooksRoute)
-  .route("/api/user", userRoute);
+  .route("/api/user", userRoute)
+  .route("/api/agent", agentRoute);
 
 /**
  * Export the app type for frontend type inference
