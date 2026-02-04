@@ -11,9 +11,9 @@ export function CanvasPage() {
   const { data: project, isLoading, error } = useProject(id || "");
   const updateProject = useUpdateProject(id || "");
 
-  // Save canvas data
+  // Save canvas data (document + session)
   const handleSave = useCallback(
-    async (data: { document: unknown }) => {
+    async (data: { document: unknown; session: unknown }) => {
       await updateProject.mutateAsync({
         canvasData: data,
       });

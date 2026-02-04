@@ -96,7 +96,7 @@ const projectsRoute = new Hono()
       .values({
         ...data,
         userId: session.user.id,
-        canvasData: [],
+        canvasData: null, // Empty canvas, will be populated on first save
       })
       .returning();
 

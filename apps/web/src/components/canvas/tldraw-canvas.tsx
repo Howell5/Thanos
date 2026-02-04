@@ -30,7 +30,7 @@ interface TldrawCanvasProps {
   projectId: string;
   projectName: string;
   canvasData?: unknown;
-  onSave: (data: { document: unknown }) => Promise<void>;
+  onSave: (data: { document: unknown; session: unknown }) => Promise<void>;
   isSaving: boolean;
 }
 
@@ -126,7 +126,7 @@ function VerticalToolbar() {
 // UI components configuration - hide unnecessary tldraw UI elements
 // Keep: Toolbar (vertical), ContextMenu (right-click), Dialogs, Toasts
 // Hide: StylePanel, NavigationPanel, MainMenu, PageMenu, ActionsMenu, HelpMenu, etc.
-const uiComponents: TLUiComponents = {
+const uiComponents: Partial<TLUiComponents> = {
   // Override toolbar to be vertical
   Toolbar: VerticalToolbar,
   // Hide panels we don't need
@@ -143,9 +143,18 @@ const uiComponents: TLUiComponents = {
   TopPanel: null,
   SharePanel: null,
   Minimap: null,
-  // Hide native selection menu (we have custom FloatingToolbar)
-  SelectionActionsMenu: null,
 };
+
+// Check if canvasData has valid snapshot format
+function isValidSnapshot(data: unknown): data is { document: unknown } {
+  return (
+    data !== null &&
+    typeof data === "object" &&
+    "document" in data &&
+    data.document !== null &&
+    typeof data.document === "object"
+  );
+}
 
 // Inner component that has access to the editor
 function CanvasInner({
@@ -153,19 +162,14 @@ function CanvasInner({
   onSave,
 }: {
   canvasData?: unknown;
-  onSave: (data: { document: unknown }) => Promise<void>;
+  onSave: (data: { document: unknown; session: unknown }) => Promise<void>;
 }) {
   const editor = useEditor();
   const hasLoadedRef = useRef(false);
 
   // Load canvas data on mount
   useEffect(() => {
-    if (
-      !hasLoadedRef.current &&
-      canvasData &&
-      typeof canvasData === "object" &&
-      Object.keys(canvasData).length > 0
-    ) {
+    if (!hasLoadedRef.current && isValidSnapshot(canvasData)) {
       try {
         loadSnapshot(editor.store, canvasData as Parameters<typeof loadSnapshot>[1]);
         hasLoadedRef.current = true;
@@ -178,8 +182,8 @@ function CanvasInner({
   // Expose save function
   useEffect(() => {
     const handleSave = async () => {
-      const { document } = getSnapshot(editor.store);
-      await onSave({ document });
+      const { document, session } = getSnapshot(editor.store);
+      await onSave({ document, session });
     };
 
     // Listen for Cmd/Ctrl + S
@@ -245,8 +249,8 @@ export function TldrawCanvas({
     if (!editorRef.current) return;
 
     try {
-      const { document } = getSnapshot(editorRef.current.store);
-      await onSave({ document });
+      const { document, session } = getSnapshot(editorRef.current.store);
+      await onSave({ document, session });
       hasUnsavedChangesRef.current = false;
       toast.success("保存成功");
     } catch {
