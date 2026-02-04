@@ -3,9 +3,14 @@ import type { AIModel, AspectRatio } from "@repo/shared";
 import { create } from "zustand";
 import { type UploadSlice, type UploadTask, createUploadSlice } from "./upload-slice";
 
-// Re-export upload types
+// Re-export upload types and selectors
 export type { UploadTask };
-export { MAX_CONCURRENT_UPLOADS } from "./upload-slice";
+export {
+  MAX_CONCURRENT_UPLOADS,
+  selectCanStartNewUpload,
+  selectHasFailedUploads,
+  selectUploadingCount,
+} from "./upload-slice";
 
 // Maximum concurrent generation tasks
 export const MAX_CONCURRENT_TASKS = 5;

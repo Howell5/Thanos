@@ -30,11 +30,6 @@ export interface UploadSlice {
   // State
   uploadTasks: Map<string, UploadTask>;
 
-  // Computed
-  uploadingCount: number;
-  hasFailedUploads: boolean;
-  canStartNewUpload: boolean;
-
   // Actions
   startUpload: (taskId: string, shapeId: string, file: File) => void;
   updateUploadProgress: (taskId: string, progress: number) => void;
@@ -51,6 +46,29 @@ interface UploadSliceDeps {
   projectId: string | null;
 }
 
+// Helper functions to compute derived state
+function computeUploadingCount(tasks: Map<string, UploadTask>): number {
+  return Array.from(tasks.values()).filter((t) => t.status === "uploading").length;
+}
+
+function computeHasFailedUploads(tasks: Map<string, UploadTask>): boolean {
+  return Array.from(tasks.values()).some((t) => t.status === "failed");
+}
+
+function computeCanStartNewUpload(tasks: Map<string, UploadTask>): boolean {
+  return computeUploadingCount(tasks) < MAX_CONCURRENT_UPLOADS;
+}
+
+// Selectors for computed values - use these in components
+export const selectUploadingCount = (state: { uploadTasks: Map<string, UploadTask> }) =>
+  computeUploadingCount(state.uploadTasks);
+
+export const selectHasFailedUploads = (state: { uploadTasks: Map<string, UploadTask> }) =>
+  computeHasFailedUploads(state.uploadTasks);
+
+export const selectCanStartNewUpload = (state: { uploadTasks: Map<string, UploadTask> }) =>
+  computeCanStartNewUpload(state.uploadTasks);
+
 export const createUploadSlice: StateCreator<
   UploadSlice & UploadSliceDeps,
   [],
@@ -59,25 +77,6 @@ export const createUploadSlice: StateCreator<
 > = (set, get) => ({
   // Initial state
   uploadTasks: new Map(),
-
-  // Computed
-  get uploadingCount() {
-    return Array.from(get().uploadTasks.values()).filter(
-      (t) => t.status === "uploading",
-    ).length;
-  },
-  get hasFailedUploads() {
-    return Array.from(get().uploadTasks.values()).some(
-      (t) => t.status === "failed",
-    );
-  },
-  get canStartNewUpload() {
-    return (
-      Array.from(get().uploadTasks.values()).filter(
-        (t) => t.status === "uploading",
-      ).length < MAX_CONCURRENT_UPLOADS
-    );
-  },
 
   // Actions
   startUpload: (taskId: string, shapeId: string, file: File) => {
@@ -173,13 +172,13 @@ export const createUploadSlice: StateCreator<
   },
 
   uploadImage: async (file: File, shapeId: string) => {
-    const { projectId, canStartNewUpload } = get();
+    const { projectId, uploadTasks } = get();
 
     if (!projectId) {
       throw new Error("未设置项目 ID");
     }
 
-    if (!canStartNewUpload) {
+    if (!computeCanStartNewUpload(uploadTasks)) {
       throw new Error(`最多同时上传 ${MAX_CONCURRENT_UPLOADS} 个文件`);
     }
 

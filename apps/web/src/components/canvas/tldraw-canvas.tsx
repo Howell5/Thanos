@@ -15,7 +15,7 @@ import {
   createImageAssetStoreWithUpload,
 } from "@/lib/image-assets";
 import { ROUTES } from "@/lib/routes";
-import { useAIStore } from "@/stores/use-ai-store";
+import { selectUploadingCount, useAIStore } from "@/stores/use-ai-store";
 import { ArrowLeft, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
@@ -143,6 +143,8 @@ const uiComponents: TLUiComponents = {
   TopPanel: null,
   SharePanel: null,
   Minimap: null,
+  // Hide native selection menu (we have custom FloatingToolbar)
+  SelectionActionsMenu: null,
 };
 
 // Inner component that has access to the editor
@@ -256,7 +258,7 @@ export function TldrawCanvas({
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       // Check for unsaved changes or uploads in progress
-      const { uploadingCount } = useAIStore.getState();
+      const uploadingCount = selectUploadingCount(useAIStore.getState());
       if (hasUnsavedChangesRef.current || uploadingCount > 0) {
         e.preventDefault();
         e.returnValue = "";

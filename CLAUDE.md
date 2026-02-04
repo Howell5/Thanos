@@ -215,26 +215,73 @@ if (json.success) {
 }
 ```
 
+### AI Image Generation
+
+The project uses Google's Gemini models for AI image generation via the `@google/genai` SDK with Vertex AI backend.
+
+**Architecture**:
+- **Service Layer**: Services are injected via middleware (`servicesMiddleware`) for testability
+- **Interfaces**: `IGeminiAIService` and `IR2Service` defined in `services/types.ts`
+- **Mock Services**: `test/mocks.ts` provides mock implementations for testing
+
+**Configuration** (required for AI features):
+```bash
+# Google Vertex AI
+GOOGLE_VERTEX_PROJECT=your-gcp-project-id
+GOOGLE_VERTEX_LOCATION=us-central1
+GOOGLE_APPLICATION_CREDENTIALS=./path-to-service-account.json
+
+# Cloudflare R2 Storage
+R2_ACCOUNT_ID=your-r2-account-id
+R2_BUCKET=your-bucket-name
+R2_CDN_DOMAIN=your-cdn-domain.com
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+```
+
+**Key Patterns**:
+- Services accessed via `c.var.geminiService` and `c.var.r2Service` in route handlers
+- Multi-image generation uses parallel API calls (Gemini `generateContent` doesn't support batch)
+- Zustand store slices: Use selectors for computed values (getters don't work in slices)
+
 ## Project Structure
 
 ```
-morph-template/
+berryon/
 ├── apps/
 │   ├── api/                    # Backend application
 │   │   ├── src/
 │   │   │   ├── routes/
+│   │   │   │   ├── ai-images/  # AI image routes (modular structure)
+│   │   │   │   │   ├── index.ts    # Route combiner
+│   │   │   │   │   ├── generate.ts # Image generation endpoint
+│   │   │   │   │   ├── inpaint.ts  # Inpainting endpoint
+│   │   │   │   │   ├── upload.ts   # Image upload endpoint
+│   │   │   │   │   ├── history.ts  # Generation history
+│   │   │   │   │   └── helpers.ts  # Shared route helpers
 │   │   │   │   ├── posts.ts    # Posts CRUD
 │   │   │   │   ├── checkout.ts # Stripe checkout session creation
 │   │   │   │   ├── orders.ts   # User order history (with pagination)
 │   │   │   │   ├── webhooks.ts # Stripe webhook handler
 │   │   │   │   └── user.ts     # User profile & credits (GET + PATCH)
+│   │   │   ├── services/       # Service layer (DI pattern)
+│   │   │   │   ├── types.ts    # Service interfaces
+│   │   │   │   ├── gemini-ai.service.ts  # Gemini AI implementation
+│   │   │   │   └── r2.service.ts  # R2 storage implementation
+│   │   │   ├── middleware/
+│   │   │   │   └── services.ts # Service injection middleware
 │   │   │   ├── db/
-│   │   │   │   ├── schema.ts   # Drizzle schema (user, orders, posts)
+│   │   │   │   ├── schema.ts   # Drizzle schema (user, orders, posts, aiImages)
 │   │   │   │   └── index.ts    # Database connection + health check
 │   │   │   ├── lib/
+│   │   │   │   ├── gemini-ai.ts  # Gemini AI SDK wrapper
+│   │   │   │   ├── r2.ts       # Cloudflare R2 storage
 │   │   │   │   ├── response.ts # ok(), err(), errors.* helpers
 │   │   │   │   ├── rate-limit.ts # Sliding window rate limiter + getClientIp
 │   │   │   │   └── stripe.ts   # Stripe client singleton
+│   │   │   ├── test/           # Test utilities
+│   │   │   │   ├── mocks.ts    # Mock services for testing
+│   │   │   │   └── app.ts      # Test app with mocks injected
 │   │   │   ├── auth.ts         # Better Auth configuration (dynamic providers)
 │   │   │   ├── client.ts       # Pre-compiled RPC client export
 │   │   │   ├── env.ts          # Environment variable validation
@@ -243,8 +290,12 @@ morph-template/
 │   └── web/                    # Frontend application
 │       ├── src/
 │       │   ├── components/
+│       │   │   ├── canvas/     # tldraw canvas components
 │       │   │   ├── ui/         # shadcn/ui components
 │       │   │   └── error-boundary.tsx  # React error boundary
+│       │   ├── stores/
+│       │   │   ├── use-ai-store.ts  # AI generation state (Zustand)
+│       │   │   └── upload-slice.ts  # Upload state slice
 │       │   ├── lib/
 │       │   │   ├── api.ts      # Typed Hono client + ApiError + auto toast
 │       │   │   ├── auth-client.ts  # Better Auth client
@@ -259,6 +310,7 @@ morph-template/
 │       └── src/
 │           ├── schemas/
 │           │   ├── common.ts   # ApiSuccess, ApiFailure, ERROR_CODES, isPaywallError
+│           │   ├── ai-image.ts # AI image generation schemas
 │           │   ├── post.ts     # Post-related schemas
 │           │   ├── order.ts    # Order schemas (with pagination)
 │           │   └── user.ts     # User update schema
@@ -356,6 +408,51 @@ const { mutate } = useMutation({
     return json.data;
   },
 });
+```
+
+### Splitting Large Route Files
+
+The project has a **500 line limit** enforced by `pnpm check:lines`. When a route file grows too large, split it into a modular folder structure:
+
+**Before** (single file exceeding limit):
+```
+routes/
+└── ai-images.ts  # 529 lines - TOO LARGE
+```
+
+**After** (modular structure):
+```
+routes/
+└── ai-images/
+    ├── index.ts      # Combines sub-routes
+    ├── generate.ts   # POST /generate endpoint
+    ├── inpaint.ts    # POST /inpaint endpoint
+    ├── upload.ts     # POST /upload endpoint
+    ├── history.ts    # GET endpoints
+    └── helpers.ts    # Shared utilities (validation, rate limiting)
+```
+
+**index.ts pattern**:
+```typescript
+import { Hono } from "hono";
+import generateRoute from "./generate";
+import inpaintRoute from "./inpaint";
+import historyRoute from "./history";
+
+const aiImagesRoute = new Hono()
+  .route("/generate", generateRoute)
+  .route("/inpaint", inpaintRoute)
+  .route("/", historyRoute);  // Routes without prefix
+
+export default aiImagesRoute;
+```
+
+**helpers.ts pattern** - Extract common logic:
+```typescript
+// Common validation, rate limiting, project access checks
+export async function verifyProjectAccess(c: Context, projectId: string, userId: string) { ... }
+export function checkAIRateLimit(c: Context, userId: string) { ... }
+export async function checkUserCredits(c: Context, userId: string, required: number) { ... }
 ```
 
 ## API Response Helpers
