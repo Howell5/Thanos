@@ -5,10 +5,10 @@
 
 import { Hono } from "hono";
 import { servicesMiddleware } from "../middleware/services";
-import type { IR2Service, IVertexAIService } from "../services/types";
+import type { IGeminiAIService, IR2Service } from "../services/types";
 
 export interface TestAppOptions {
-  vertexService?: IVertexAIService;
+  geminiService?: IGeminiAIService;
   r2Service?: IR2Service;
 }
 

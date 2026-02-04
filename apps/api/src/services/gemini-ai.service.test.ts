@@ -1,15 +1,15 @@
 /**
- * Vertex AI Service Tests
+ * Gemini AI Service Tests
  * Tests the service layer without making actual API calls
  */
 
-import { describe, expect, it, vi } from "vitest";
-import type { GenerateImageParams } from "../lib/vertex-ai";
-import { MockVertexAIService } from "../test/mocks";
+import { describe, expect, it } from "vitest";
+import type { GenerateImageParams } from "../lib/gemini-ai";
+import { MockGeminiAIService } from "../test/mocks";
 
-describe("MockVertexAIService", () => {
+describe("MockGeminiAIService", () => {
   it("should generate an image successfully", async () => {
-    const service = new MockVertexAIService();
+    const service = new MockGeminiAIService();
     const params: GenerateImageParams = {
       prompt: "A beautiful sunset",
       aspectRatio: "16:9",
@@ -25,7 +25,7 @@ describe("MockVertexAIService", () => {
   });
 
   it("should return correct dimensions for different aspect ratios", async () => {
-    const service = new MockVertexAIService();
+    const service = new MockGeminiAIService();
 
     const testCases = [
       { aspectRatio: "1:1", expectedWidth: 1024, expectedHeight: 1024 },
@@ -46,7 +46,7 @@ describe("MockVertexAIService", () => {
   });
 
   it("should track generate calls", async () => {
-    const service = new MockVertexAIService();
+    const service = new MockGeminiAIService();
 
     await service.generateImage({ prompt: "First prompt" });
     await service.generateImage({ prompt: "Second prompt", aspectRatio: "16:9" });
@@ -58,22 +58,24 @@ describe("MockVertexAIService", () => {
   });
 
   it("should fail when configured to fail", async () => {
-    const service = new MockVertexAIService();
+    const service = new MockGeminiAIService();
     service.setFailure(true, "Test failure message");
 
     await expect(service.generateImage({ prompt: "test" })).rejects.toThrow("Test failure message");
   });
 
   it("should estimate credits correctly", () => {
-    const service = new MockVertexAIService();
+    const service = new MockGeminiAIService();
 
-    expect(service.estimateCredits({ prompt: "test" })).toBe(100);
-    expect(service.estimateCredits({ prompt: "test", model: "imagen-3.0-generate-001" })).toBe(100);
-    expect(service.estimateCredits({ prompt: "test", model: "imagen-3.0-fast-001" })).toBe(50);
+    // Default model (gemini-2.5-flash-image) costs 50
+    expect(service.estimateCredits({ prompt: "test" })).toBe(50);
+    expect(service.estimateCredits({ prompt: "test", model: "gemini-2.5-flash-image" })).toBe(50);
+    // Pro model costs 100
+    expect(service.estimateCredits({ prompt: "test", model: "gemini-3-pro-image-preview" })).toBe(100);
   });
 
   it("should report configured status", () => {
-    const service = new MockVertexAIService();
+    const service = new MockGeminiAIService();
 
     expect(service.isConfigured()).toBe(true);
 
@@ -82,7 +84,7 @@ describe("MockVertexAIService", () => {
   });
 
   it("should reset state correctly", async () => {
-    const service = new MockVertexAIService();
+    const service = new MockGeminiAIService();
 
     service.setConfigured(false);
     service.setFailure(true);

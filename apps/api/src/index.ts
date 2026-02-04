@@ -41,7 +41,7 @@ import { auth } from "./auth";
 import { checkDatabaseHealth, closeDatabase } from "./db";
 import { validateEnv } from "./env";
 import { servicesMiddleware } from "./middleware/services";
-import aiImagesRoute from "./routes/ai-images";
+import aiImagesRoute from "./routes/ai-images/index";
 import checkoutRoute from "./routes/checkout";
 import ordersRoute from "./routes/orders";
 import postsRoute from "./routes/posts";

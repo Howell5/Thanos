@@ -7,21 +7,31 @@ import { z } from "zod";
 
 /**
  * Supported aspect ratios
+ * Full list from Gemini docs: 1:1, 3:2, 2:3, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9
  */
-export const aspectRatioSchema = z.enum(["1:1", "16:9", "9:16", "4:3", "3:4"]);
+export const aspectRatioSchema = z.enum([
+  "1:1",
+  "3:2",
+  "2:3",
+  "3:4",
+  "4:3",
+  "4:5",
+  "5:4",
+  "9:16",
+  "16:9",
+  "21:9",
+]);
 
 export type AspectRatio = z.infer<typeof aspectRatioSchema>;
 
 /**
- * Supported AI models
- * - imagen-3.0-generate-001: High quality text-to-image
- * - imagen-3.0-fast-001: Faster generation, lower quality
- * - imagen-3.0-capability-001: Supports editing (inpainting, outpainting, image-to-image)
+ * Supported AI models for image generation
+ * - gemini-2.5-flash-image: Fast image generation (nanobanana)
+ * - gemini-3-pro-image-preview: High quality image generation (nanobanana pro)
  */
 export const aiModelSchema = z.enum([
-  "imagen-3.0-generate-001",
-  "imagen-3.0-fast-001",
-  "imagen-3.0-capability-001",
+  "gemini-2.5-flash-image",
+  "gemini-3-pro-image-preview",
 ]);
 
 export type AIModel = z.infer<typeof aiModelSchema>;
@@ -34,11 +44,13 @@ export const generateImageSchema = z.object({
   prompt: z.string().min(1, "Prompt is required").max(2000),
   negativePrompt: z.string().max(2000).optional(),
   aspectRatio: aspectRatioSchema.default("1:1"),
-  model: aiModelSchema.default("imagen-3.0-generate-001"),
-  // Reference images for image-to-image generation (base64 strings, max 4)
+  model: aiModelSchema.default("gemini-2.5-flash-image"),
+  // Number of images to generate (1-4, default 1)
+  numberOfImages: z.coerce.number().int().min(1).max(4).default(1),
+  // Reference images for image-to-image generation (base64 strings, max 3 for flash, 14 for pro)
   referenceImages: z
     .array(z.string().min(1))
-    .max(4, "Maximum 4 reference images allowed")
+    .max(14, "Maximum 14 reference images allowed")
     .optional(),
 });
 

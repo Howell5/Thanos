@@ -3,18 +3,20 @@
  * These interfaces allow for easy mocking in tests
  */
 
-import type { UploadOptions, UploadResult } from "../lib/r2";
 import type {
   GenerateImageParams,
   GenerateImageResult,
+  GenerateMultipleImagesResult,
   InpaintImageParams,
-} from "../lib/vertex-ai";
+} from "../lib/gemini-ai";
+import type { UploadOptions, UploadResult } from "../lib/r2";
 
 /**
- * Vertex AI Service Interface
+ * Gemini AI Service Interface
  */
-export interface IVertexAIService {
+export interface IGeminiAIService {
   generateImage(params: GenerateImageParams): Promise<GenerateImageResult>;
+  generateImages(params: GenerateImageParams): Promise<GenerateMultipleImagesResult>;
   inpaintImage(params: InpaintImageParams): Promise<GenerateImageResult>;
   estimateCredits(params: GenerateImageParams): number;
   estimateInpaintCredits(): number;
@@ -35,7 +37,7 @@ export interface IR2Service {
  * Service context type for Hono c.var
  */
 export interface ServiceContext {
-  vertexService: IVertexAIService;
+  geminiService: IGeminiAIService;
   r2Service: IR2Service;
 }
 

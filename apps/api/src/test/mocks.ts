@@ -4,14 +4,19 @@
  */
 
 import type { UploadOptions, UploadResult } from "../lib/r2";
-import type { GenerateImageParams, GenerateImageResult, InpaintImageParams } from "../lib/vertex-ai";
-import type { IR2Service, IVertexAIService } from "../services/types";
+import type {
+  GenerateImageParams,
+  GenerateImageResult,
+  GenerateMultipleImagesResult,
+  InpaintImageParams,
+} from "../lib/gemini-ai";
+import type { IGeminiAIService, IR2Service } from "../services/types";
 
 /**
- * Mock Vertex AI Service
+ * Mock Gemini AI Service
  * Simulates AI image generation without making actual API calls
  */
-export class MockVertexAIService implements IVertexAIService {
+export class MockGeminiAIService implements IGeminiAIService {
   private _isConfigured = true;
   private _shouldFail = false;
   private _failMessage = "Mock AI generation failed";
@@ -19,22 +24,36 @@ export class MockVertexAIService implements IVertexAIService {
   private _inpaintCalls: InpaintImageParams[] = [];
 
   async generateImage(params: GenerateImageParams): Promise<GenerateImageResult> {
+    const result = await this.generateImages(params);
+    return result.images[0];
+  }
+
+  async generateImages(params: GenerateImageParams): Promise<GenerateMultipleImagesResult> {
     this._generateCalls.push(params);
 
     if (this._shouldFail) {
       throw new Error(this._failMessage);
     }
 
-    // Return a mock image result
+    // Return mock image results
     const aspectRatio = params.aspectRatio || "1:1";
     const dimensions = this.getDimensions(aspectRatio);
+    const numberOfImages = params.numberOfImages || 1;
+
+    const images: GenerateImageResult[] = [];
+    for (let i = 0; i < numberOfImages; i++) {
+      images.push({
+        imageData: Buffer.from(`mock-image-data-${i}`),
+        width: dimensions.width,
+        height: dimensions.height,
+        mimeType: "image/png",
+        durationMs: 1000,
+      });
+    }
 
     return {
-      imageData: Buffer.from("mock-image-data"),
-      width: dimensions.width,
-      height: dimensions.height,
-      mimeType: "image/png",
-      durationMs: 1000,
+      images,
+      totalDurationMs: 1000,
     };
   }
 
@@ -56,11 +75,10 @@ export class MockVertexAIService implements IVertexAIService {
   }
 
   estimateCredits(params: GenerateImageParams): number {
-    const model = params.model || "imagen-3.0-generate-001";
-    if (model.includes("fast")) {
-      return 50;
-    }
-    return 100;
+    const model = params.model || "gemini-2.5-flash-image";
+    const numberOfImages = params.numberOfImages || 1;
+    const costPerImage = model.includes("pro") ? 100 : 50;
+    return costPerImage * numberOfImages;
   }
 
   estimateInpaintCredits(): number {
@@ -187,11 +205,11 @@ export class MockR2Service implements IR2Service {
  * Create fresh mock services for a test
  */
 export function createMockServices(): {
-  vertexService: MockVertexAIService;
+  geminiService: MockGeminiAIService;
   r2Service: MockR2Service;
 } {
   return {
-    vertexService: new MockVertexAIService(),
+    geminiService: new MockGeminiAIService(),
     r2Service: new MockR2Service(),
   };
 }

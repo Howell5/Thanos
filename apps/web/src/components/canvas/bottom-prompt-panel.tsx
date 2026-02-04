@@ -9,6 +9,7 @@ import {
   ASPECT_RATIOS,
   IMAGE_MODELS,
   MAX_CONCURRENT_TASKS,
+  NUMBER_OF_IMAGES_OPTIONS,
   useAIStore,
 } from "@/stores/use-ai-store";
 import type { AspectRatio } from "@repo/shared";
@@ -26,7 +27,7 @@ export function BottomPromptPanel() {
   const editor = useEditor();
   const {
     generatingTasks,
-    generateImage,
+    generateImages,
     startGenerating,
     completeGenerating,
     failGenerating,
@@ -36,6 +37,8 @@ export function BottomPromptPanel() {
     setCurrentModel,
     aspectRatio,
     setAspectRatio,
+    numberOfImages,
+    setNumberOfImages,
     editMode,
     inpaintTarget,
     exitInpaintMode,
@@ -104,46 +107,48 @@ export function BottomPromptPanel() {
     if (!prompt.trim() || !canStartNewTask) return;
 
     const currentPrompt = prompt.trim();
-
-    // Get aspect ratio for placeholder dimensions calculation
     const currentAspectRatio = aspectRatio;
+    const currentNumberOfImages = numberOfImages;
 
     // Calculate placeholder dimensions
     const { width: placeholderWidth, height: placeholderHeight } =
       getPlaceholderDimensions(currentAspectRatio);
 
-    // Calculate position for new image using smart placement
-    // For image-to-image: anchor to selected images
-    // For text-to-image: anchor to viewport center (empty array)
+    // Calculate positions for all placeholders
     const anchorShapeIds = selectedImages.map((img) => img.id);
-    const smartPosition = findNonOverlappingPosition(
+
+    // Create placeholder shapes for each image to be generated
+    const placeholders: Array<{ taskId: string; shapeId: string }> = [];
+    let lastPosition = findNonOverlappingPosition(
       editor,
       anchorShapeIds,
       placeholderWidth,
       placeholderHeight,
     );
-    const position = {
-      x: smartPosition.x,
-      y: smartPosition.y + placeholderHeight / 2,
-      anchorLeft: true,
-    };
 
-    // Generate task ID
-    const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    for (let i = 0; i < currentNumberOfImages; i++) {
+      const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${i}`;
 
-    // Create placeholder shape
-    const shapeId = createPlaceholderShape(editor, {
-      taskId,
-      aspectRatio: currentAspectRatio,
-      modelId: currentModel.id,
-      modelName: currentModel.name,
-      prompt: currentPrompt,
-      imageSize: currentAspectRatio,
-      position,
-    });
+      // For subsequent images, offset horizontally with gap
+      const position = {
+        x: lastPosition.x + i * (placeholderWidth + 20),
+        y: lastPosition.y + placeholderHeight / 2,
+        anchorLeft: true,
+      };
 
-    // Start tracking the task
-    startGenerating(taskId, shapeId, currentPrompt);
+      const shapeId = createPlaceholderShape(editor, {
+        taskId,
+        aspectRatio: currentAspectRatio,
+        modelId: currentModel.id,
+        modelName: currentModel.name,
+        prompt: currentPrompt,
+        imageSize: currentAspectRatio,
+        position,
+      });
+
+      placeholders.push({ taskId, shapeId });
+      startGenerating(taskId, shapeId, currentPrompt);
+    }
 
     // Clear prompt immediately so user can start typing next one
     setPrompt("");
@@ -153,24 +158,26 @@ export function BottomPromptPanel() {
       selectedImages.length > 0 ? selectedImages.map((img) => img.src) : undefined;
 
     try {
-      // Generate image (this runs in background)
-      // Pass reference images if any are selected
-      const { imageUrl, imageId } = await generateImage(currentPrompt, referenceImages);
+      // Generate images (this runs in background)
+      const result = await generateImages(currentPrompt, referenceImages);
 
-      // Update placeholder with real image
-      await updatePlaceholderWithImage(editor, shapeId, imageUrl, imageId);
+      // Update each placeholder with corresponding image
+      for (let i = 0; i < result.images.length && i < placeholders.length; i++) {
+        const { imageUrl, imageId } = result.images[i];
+        const { taskId, shapeId } = placeholders[i];
 
-      // Complete the task
-      completeGenerating(taskId, imageUrl, imageId);
+        await updatePlaceholderWithImage(editor, shapeId, imageUrl, imageId);
+        completeGenerating(taskId, imageUrl, imageId);
+      }
     } catch (err) {
-      console.error("Failed to generate image:", err);
+      console.error("Failed to generate images:", err);
 
-      // Remove placeholder on error
-      removePlaceholderShape(editor, shapeId);
-
-      // Fail the task
-      const errorMessage = err instanceof Error ? err.message : "未知错误";
-      failGenerating(taskId, errorMessage);
+      // Remove all placeholders on error
+      for (const { taskId, shapeId } of placeholders) {
+        removePlaceholderShape(editor, shapeId);
+        const errorMessage = err instanceof Error ? err.message : "未知错误";
+        failGenerating(taskId, errorMessage);
+      }
     }
   };
 
@@ -399,6 +406,24 @@ export function BottomPromptPanel() {
                 </div>
               )}
             />
+
+            {/* Number of Images Selector */}
+            <div className="flex items-center rounded-lg bg-gray-100 p-0.5">
+              {NUMBER_OF_IMAGES_OPTIONS.map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setNumberOfImages(n)}
+                  className={`rounded-md px-2.5 py-1 text-sm transition-colors ${
+                    numberOfImages === n
+                      ? "bg-white text-gray-800 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                  title={n === 1 ? "生成1张" : `批量生成${n}张`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Right: Status + Generate Button */}

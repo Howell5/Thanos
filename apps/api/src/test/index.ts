@@ -4,4 +4,4 @@
  */
 
 export { cleanupDatabase, createTestUser, createTestProject, createTestSession } from "./setup";
-export { MockVertexAIService, MockR2Service, createMockServices } from "./mocks";
+export { MockGeminiAIService, MockR2Service, createMockServices } from "./mocks";

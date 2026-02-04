@@ -21,14 +21,14 @@ const envSchema = z.object({
     .transform((v) => v === "true" || v === "1")
     .default("false"),
   // Vertex AI configuration
-  GOOGLE_CLOUD_PROJECT: z.string().optional(),
-  GOOGLE_CLOUD_LOCATION: z.string().default("us-central1"),
+  GOOGLE_VERTEX_PROJECT: z.string().optional(),
+  GOOGLE_VERTEX_LOCATION: z.string().default("us-central1"),
   // Cloudflare R2 configuration
-  R2_ENDPOINT: z.string().url().optional(),
+  R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),
   R2_SECRET_ACCESS_KEY: z.string().optional(),
   R2_BUCKET: z.string().default("berryon-medias"),
-  R2_PUBLIC_URL: z.string().url().default("https://img.berryon.art"),
+  R2_CDN_DOMAIN: z.string().default("img.berryon.art"),
 });
 
 export type Env = z.infer<typeof envSchema>;
