@@ -4,10 +4,12 @@
  */
 
 import {
+  type PresignedUploadResult,
   type UploadOptions,
   type UploadResult,
   deleteFromR2,
   generateImageKey,
+  generateUploadUrl,
   isR2Configured,
   uploadToR2,
 } from "../lib/r2";
@@ -27,6 +29,14 @@ export class R2Service implements IR2Service {
 
   generateImageKey(userId: string, projectId: string): string {
     return generateImageKey(userId, projectId);
+  }
+
+  async generatePresignedUploadUrl(
+    key: string,
+    contentType: string,
+    expiresIn?: number,
+  ): Promise<PresignedUploadResult> {
+    return generateUploadUrl(key, contentType, expiresIn);
   }
 
   isConfigured(): boolean {

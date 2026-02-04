@@ -47,10 +47,7 @@ export type ImageSize = z.infer<typeof imageSizeSchema>;
  * - gemini-2.5-flash-image: Fast image generation (nanobanana)
  * - gemini-3-pro-image-preview: High quality image generation (nanobanana pro)
  */
-export const aiModelSchema = z.enum([
-  "gemini-2.5-flash-image",
-  "gemini-3-pro-image-preview",
-]);
+export const aiModelSchema = z.enum(["gemini-2.5-flash-image", "gemini-3-pro-image-preview"]);
 
 export type AIModel = z.infer<typeof aiModelSchema>;
 
@@ -140,15 +137,6 @@ export interface AIImageResponse {
 }
 
 /**
- * Schema for uploading an image
- */
-export const uploadImageSchema = z.object({
-  projectId: z.string().uuid(),
-});
-
-export type UploadImage = z.infer<typeof uploadImageSchema>;
-
-/**
  * Maximum file size for image upload (10MB)
  */
 export const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
@@ -167,9 +155,72 @@ export const ALLOWED_IMAGE_TYPES = [
 export type AllowedImageType = (typeof ALLOWED_IMAGE_TYPES)[number];
 
 /**
- * Upload image response
+ * Schema for uploading an image (legacy - used for form data)
+ */
+export const uploadImageSchema = z.object({
+  projectId: z.string().uuid(),
+});
+
+export type UploadImage = z.infer<typeof uploadImageSchema>;
+
+/**
+ * Schema for requesting a presigned upload URL
+ * Client will use this URL to upload directly to R2
+ */
+export const presignUploadSchema = z.object({
+  projectId: z.string().uuid(),
+  filename: z.string().min(1).max(255),
+  contentType: z.enum(ALLOWED_IMAGE_TYPES),
+  fileSize: z.number().int().positive().max(MAX_UPLOAD_SIZE),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+});
+
+export type PresignUpload = z.infer<typeof presignUploadSchema>;
+
+/**
+ * Schema for confirming upload completion
+ * Called after client successfully uploads to R2
+ */
+export const confirmUploadSchema = z.object({
+  projectId: z.string().uuid(),
+  key: z.string().min(1),
+  filename: z.string().min(1).max(255),
+  contentType: z.enum(ALLOWED_IMAGE_TYPES),
+  fileSize: z.number().int().positive(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+});
+
+export type ConfirmUpload = z.infer<typeof confirmUploadSchema>;
+
+/**
+ * Upload image response (legacy)
  */
 export interface UploadImageResponse {
+  id: string;
+  r2Url: string;
+  width: number;
+  height: number;
+  fileSize: number;
+  mimeType: string;
+  originalFileName: string;
+}
+
+/**
+ * Presigned upload URL response
+ */
+export interface PresignUploadResponse {
+  uploadUrl: string;
+  cdnUrl: string;
+  key: string;
+  expiresIn: number;
+}
+
+/**
+ * Confirm upload response
+ */
+export interface ConfirmUploadResponse {
   id: string;
   r2Url: string;
   width: number;

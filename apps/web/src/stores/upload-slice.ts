@@ -1,14 +1,37 @@
 /**
  * Upload slice for AI store
- * Handles image upload state management
+ * Handles image upload state management with direct R2 upload via presigned URLs
  */
 
-import { ApiError } from "@/lib/api";
-import type { UploadImageResponse } from "@repo/shared";
+import { ApiError, api } from "@/lib/api";
+import type { ConfirmUploadResponse, PresignUploadResponse } from "@repo/shared";
 import type { StateCreator } from "zustand";
 
 // Maximum concurrent upload tasks
 export const MAX_CONCURRENT_UPLOADS = 3;
+
+/**
+ * Get image dimensions from a File object
+ * Uses browser's Image API to load and measure the image
+ */
+function getImageDimensions(file: File): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("无法读取图片尺寸"));
+    };
+
+    img.src = url;
+  });
+}
 
 // Upload task info
 export interface UploadTask {
@@ -35,9 +58,9 @@ export interface UploadSlice {
   updateUploadProgress: (taskId: string, progress: number) => void;
   completeUpload: (taskId: string, r2Url: string, imageId: string) => void;
   failUpload: (taskId: string, error: string) => void;
-  retryUpload: (taskId: string) => Promise<UploadImageResponse>;
+  retryUpload: (taskId: string) => Promise<ConfirmUploadResponse>;
   cancelUpload: (taskId: string) => void;
-  uploadImage: (file: File, shapeId: string) => Promise<UploadImageResponse>;
+  uploadImage: (file: File, shapeId: string) => Promise<ConfirmUploadResponse>;
   getUploadTask: (taskId: string) => UploadTask | undefined;
 }
 
@@ -69,12 +92,10 @@ export const selectHasFailedUploads = (state: { uploadTasks: Map<string, UploadT
 export const selectCanStartNewUpload = (state: { uploadTasks: Map<string, UploadTask> }) =>
   computeCanStartNewUpload(state.uploadTasks);
 
-export const createUploadSlice: StateCreator<
-  UploadSlice & UploadSliceDeps,
-  [],
-  [],
-  UploadSlice
-> = (set, get) => ({
+export const createUploadSlice: StateCreator<UploadSlice & UploadSliceDeps, [], [], UploadSlice> = (
+  set,
+  get,
+) => ({
   // Initial state
   uploadTasks: new Map(),
 
@@ -188,44 +209,80 @@ export const createUploadSlice: StateCreator<
     get().startUpload(taskId, shapeId, file);
 
     try {
-      // Simulate progress updates (since fetch doesn't support progress for uploads easily)
-      const progressInterval = setInterval(() => {
-        const task = get().uploadTasks.get(taskId);
-        if (task && task.status === "uploading" && task.progress < 90) {
-          get().updateUploadProgress(taskId, Math.min(task.progress + 10, 90));
-        }
-      }, 200);
+      // Read image dimensions from file
+      const dimensions = await getImageDimensions(file);
 
-      // Create FormData for upload
-      const formData = new FormData();
-      formData.append("projectId", projectId);
-      formData.append("file", file);
+      // Step 1: Get presigned upload URL from backend (10%)
+      get().updateUploadProgress(taskId, 10);
 
-      // Use native fetch for FormData upload
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/ai-images/upload`,
-        {
-          method: "POST",
-          body: formData,
-          credentials: "include",
+      const presignRes = await api.api["ai-images"].presign.$post({
+        json: {
+          projectId,
+          filename: file.name,
+          contentType: file.type as
+            | "image/png"
+            | "image/jpeg"
+            | "image/jpg"
+            | "image/webp"
+            | "image/gif",
+          fileSize: file.size,
+          width: dimensions.width,
+          height: dimensions.height,
         },
-      );
+      });
 
-      clearInterval(progressInterval);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+      const presignJson = await presignRes.json();
+      if (!presignJson.success) {
         throw new Error(
-          errorData.error?.message || `上传失败 (${response.status})`,
+          (presignJson as { error?: { message?: string } }).error?.message || "获取上传 URL 失败",
         );
       }
 
-      const json = await response.json();
-      if (!json.success) {
-        throw new Error(json.error?.message || "上传失败");
+      const presignData = presignJson.data as PresignUploadResponse;
+
+      // Step 2: Upload directly to R2 using presigned URL (10% -> 80%)
+      get().updateUploadProgress(taskId, 30);
+
+      const uploadRes = await fetch(presignData.uploadUrl, {
+        method: "PUT",
+        body: file,
+        headers: {
+          "Content-Type": file.type,
+        },
+      });
+
+      if (!uploadRes.ok) {
+        throw new Error(`上传到存储失败 (${uploadRes.status})`);
       }
 
-      const data = json.data as UploadImageResponse;
+      get().updateUploadProgress(taskId, 80);
+
+      // Step 3: Confirm upload completion to backend (80% -> 100%)
+      const confirmRes = await api.api["ai-images"].presign.confirm.$post({
+        json: {
+          projectId,
+          key: presignData.key,
+          filename: file.name,
+          contentType: file.type as
+            | "image/png"
+            | "image/jpeg"
+            | "image/jpg"
+            | "image/webp"
+            | "image/gif",
+          fileSize: file.size,
+          width: dimensions.width,
+          height: dimensions.height,
+        },
+      });
+
+      const confirmJson = await confirmRes.json();
+      if (!confirmJson.success) {
+        throw new Error(
+          (confirmJson as { error?: { message?: string } }).error?.message || "确认上传失败",
+        );
+      }
+
+      const data = confirmJson.data as ConfirmUploadResponse;
 
       // Complete the upload
       get().completeUpload(taskId, data.r2Url, data.id);

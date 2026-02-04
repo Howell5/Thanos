@@ -3,13 +3,13 @@
  * Provides mock implementations of services that can be injected via DI
  */
 
-import type { UploadOptions, UploadResult } from "../lib/r2";
 import type {
   GenerateImageParams,
   GenerateImageResult,
   GenerateMultipleImagesResult,
   InpaintImageParams,
 } from "../lib/gemini-ai";
+import type { PresignedUploadResult, UploadOptions, UploadResult } from "../lib/r2";
 import type { IGeminiAIService, IR2Service } from "../services/types";
 
 /**
@@ -166,6 +166,23 @@ export class MockR2Service implements IR2Service {
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(2, 8);
     return `projects/${projectId}/images/${timestamp}-${random}.png`;
+  }
+
+  async generatePresignedUploadUrl(
+    key: string,
+    contentType: string,
+    expiresIn = 1800,
+  ): Promise<PresignedUploadResult> {
+    if (this._shouldFail) {
+      throw new Error(this._failMessage);
+    }
+
+    return {
+      uploadUrl: `https://mock-presign-url.r2.cloudflarestorage.com/${key}?signature=mock`,
+      cdnUrl: `https://img.berryon.art/${key}`,
+      key,
+      expiresIn,
+    };
   }
 
   isConfigured(): boolean {

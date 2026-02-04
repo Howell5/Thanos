@@ -3,20 +3,16 @@
  * Tests for POST /api/ai-images/upload endpoint
  */
 
-import { describe, expect, it, beforeEach, vi } from "vitest";
-import { Hono } from "hono";
 import { MAX_UPLOAD_SIZE } from "@repo/shared";
 import type { ApiFailure, ApiSuccess, UploadImageResponse } from "@repo/shared";
-import { servicesMiddleware } from "../../middleware/services";
-import { createMockServices, MockR2Service } from "../../test/mocks";
-import {
-  cleanupDatabase,
-  createTestUser,
-  createTestProject,
-} from "../../test/setup";
+import { eq } from "drizzle-orm";
+import { Hono } from "hono";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "../../db";
 import { aiImages } from "../../db/schema";
-import { eq } from "drizzle-orm";
+import { servicesMiddleware } from "../../middleware/services";
+import { MockR2Service, createMockServices } from "../../test/mocks";
+import { cleanupDatabase, createTestProject, createTestUser } from "../../test/setup";
 
 type UploadResponse = ApiSuccess<UploadImageResponse> | ApiFailure;
 
@@ -50,11 +46,7 @@ function createTestApp(mockR2?: MockR2Service) {
 }
 
 // Helper to make upload request
-async function uploadFile(
-  app: Hono,
-  projectId: string,
-  file: File,
-) {
+async function uploadFile(app: Hono, projectId: string, file: File) {
   const formData = new FormData();
   formData.append("projectId", projectId);
   formData.append("file", file);
@@ -69,14 +61,39 @@ async function uploadFile(
 function createMockPngFile(sizeInBytes = 1000): File {
   // Create a minimal valid PNG header + data
   const pngHeader = new Uint8Array([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
-    0x00, 0x00, 0x00, 0x0d, // IHDR chunk length
-    0x49, 0x48, 0x44, 0x52, // IHDR
-    0x00, 0x00, 0x00, 0x10, // width: 16
-    0x00, 0x00, 0x00, 0x10, // height: 16
-    0x08, 0x02, // bit depth: 8, color type: 2 (RGB)
-    0x00, 0x00, 0x00, // compression, filter, interlace
-    0x90, 0x77, 0x53, 0xde, // CRC
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a, // PNG signature
+    0x00,
+    0x00,
+    0x00,
+    0x0d, // IHDR chunk length
+    0x49,
+    0x48,
+    0x44,
+    0x52, // IHDR
+    0x00,
+    0x00,
+    0x00,
+    0x10, // width: 16
+    0x00,
+    0x00,
+    0x00,
+    0x10, // height: 16
+    0x08,
+    0x02, // bit depth: 8, color type: 2 (RGB)
+    0x00,
+    0x00,
+    0x00, // compression, filter, interlace
+    0x90,
+    0x77,
+    0x53,
+    0xde, // CRC
   ]);
 
   // Pad with zeros to reach desired size
@@ -90,15 +107,28 @@ function createMockPngFile(sizeInBytes = 1000): File {
 function createMockJpegFile(sizeInBytes = 1000): File {
   // Create a minimal valid JPEG header
   const jpegHeader = new Uint8Array([
-    0xff, 0xd8, 0xff, 0xe0, // JPEG SOI + APP0
-    0x00, 0x10, // APP0 length
-    0x4a, 0x46, 0x49, 0x46, 0x00, // "JFIF\0"
-    0x01, 0x01, // version
+    0xff,
+    0xd8,
+    0xff,
+    0xe0, // JPEG SOI + APP0
+    0x00,
+    0x10, // APP0 length
+    0x4a,
+    0x46,
+    0x49,
+    0x46,
+    0x00, // "JFIF\0"
+    0x01,
+    0x01, // version
     0x00, // aspect ratio units
-    0x00, 0x01, // x density
-    0x00, 0x01, // y density
-    0x00, 0x00, // thumbnail
-    0xff, 0xd9, // EOI
+    0x00,
+    0x01, // x density
+    0x00,
+    0x01, // y density
+    0x00,
+    0x00, // thumbnail
+    0xff,
+    0xd9, // EOI
   ]);
 
   const data = new Uint8Array(Math.max(sizeInBytes, jpegHeader.length));
@@ -168,10 +198,7 @@ describe("Image Upload Route", () => {
       if (json.success) {
         // Verify database record
         const db = getDb();
-        const [record] = await db
-          .select()
-          .from(aiImages)
-          .where(eq(aiImages.id, json.data.id));
+        const [record] = await db.select().from(aiImages).where(eq(aiImages.id, json.data.id));
 
         expect(record).toBeDefined();
         expect(record.source).toBe("upload");

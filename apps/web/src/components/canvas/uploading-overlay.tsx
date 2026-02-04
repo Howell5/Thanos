@@ -1,5 +1,5 @@
 import type { ImageMeta } from "@/lib/image-assets";
-import { useAIStore, type UploadTask } from "@/stores/use-ai-store";
+import { type UploadTask, useAIStore } from "@/stores/use-ai-store";
 import { useCallback, useEffect, useState } from "react";
 import { type TLShapeId, useEditor } from "tldraw";
 
@@ -15,9 +15,7 @@ interface UploadingShapeInfo {
 export function UploadingOverlay() {
   const editor = useEditor();
   const { uploadTasks, retryUpload, cancelUpload } = useAIStore();
-  const [uploadingShapes, setUploadingShapes] = useState<UploadingShapeInfo[]>(
-    [],
-  );
+  const [uploadingShapes, setUploadingShapes] = useState<UploadingShapeInfo[]>([]);
 
   // Find all shapes that are currently uploading
   const updateUploadingShapes = useCallback(() => {
@@ -125,17 +123,13 @@ export function UploadingOverlay() {
                       style={{ width: `${progress}%` }}
                     />
                   </div>
-                  <span className="text-xs font-medium text-white">
-                    上传中 {progress}%
-                  </span>
+                  <span className="text-xs font-medium text-white">上传中 {progress}%</span>
                 </>
               )}
 
               {isFailed && task && (
                 <>
-                  <span className="text-xs font-medium text-red-300">
-                    上传失败
-                  </span>
+                  <span className="text-xs font-medium text-red-300">上传失败</span>
                   <div className="pointer-events-auto flex gap-2">
                     <button
                       onClick={() => handleRetry(task.id)}

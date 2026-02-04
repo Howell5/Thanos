@@ -125,7 +125,7 @@ export async function deleteFromR2(key: string): Promise<void> {
 }
 
 /**
- * Generate a signed URL for private access
+ * Generate a signed URL for private access (GET)
  */
 export async function getR2SignedUrl(key: string, expiresIn = PRESIGN_EXPIRATION): Promise<string> {
   const client = getR2Client();
@@ -137,6 +137,42 @@ export async function getR2SignedUrl(key: string, expiresIn = PRESIGN_EXPIRATION
   });
 
   return getSignedUrl(client, command, { expiresIn });
+}
+
+export interface PresignedUploadResult {
+  uploadUrl: string;
+  cdnUrl: string;
+  key: string;
+  expiresIn: number;
+}
+
+/**
+ * Generate a presigned URL for direct upload from client (PUT)
+ * This allows frontend to upload directly to R2 without going through the backend
+ */
+export async function generateUploadUrl(
+  key: string,
+  contentType: string,
+  expiresIn = PRESIGN_EXPIRATION,
+): Promise<PresignedUploadResult> {
+  const client = getR2Client();
+  const config = getR2Config();
+
+  const command = new PutObjectCommand({
+    Bucket: config.bucketName,
+    Key: key,
+    ContentType: contentType,
+  });
+
+  const uploadUrl = await getSignedUrl(client, command, { expiresIn });
+  const cdnUrl = `https://${config.cdnDomain}/${key}`;
+
+  return {
+    uploadUrl,
+    cdnUrl,
+    key,
+    expiresIn,
+  };
 }
 
 /**

@@ -22,59 +22,102 @@ import {
   verifyProjectAccess,
 } from "./helpers";
 
-const generateRoute = new Hono().post(
-  "/",
-  zValidator("json", generateImageSchema),
-  async (c) => {
-    const session = await getSessionOrMock(c);
-    if (!session) {
-      return errors.unauthorized(c);
-    }
+const generateRoute = new Hono().post("/", zValidator("json", generateImageSchema), async (c) => {
+  const session = await getSessionOrMock(c);
+  if (!session) {
+    return errors.unauthorized(c);
+  }
 
-    const geminiService = c.var.geminiService;
-    const r2Service = c.var.r2Service;
+  const geminiService = c.var.geminiService;
+  const r2Service = c.var.r2Service;
 
-    if (!geminiService.isConfigured()) {
-      return errors.serviceUnavailable(c, "AI image generation is not configured");
-    }
+  if (!geminiService.isConfigured()) {
+    return errors.serviceUnavailable(c, "AI image generation is not configured");
+  }
 
-    const data = c.req.valid("json");
-    const { projectId, prompt, negativePrompt, aspectRatio, imageSize, model, numberOfImages, referenceImages } = data;
+  const data = c.req.valid("json");
+  const {
+    projectId,
+    prompt,
+    negativePrompt,
+    aspectRatio,
+    imageSize,
+    model,
+    numberOfImages,
+    referenceImages,
+  } = data;
 
-    const hasReferenceImages = referenceImages && referenceImages.length > 0;
-    const operation = hasReferenceImages ? "image-to-image" : "text-to-image";
-    const usedModel = model || DEFAULT_MODEL;
-    const imageCount = numberOfImages || 1;
+  const hasReferenceImages = referenceImages && referenceImages.length > 0;
+  const operation = hasReferenceImages ? "image-to-image" : "text-to-image";
+  const usedModel = model || DEFAULT_MODEL;
+  const imageCount = numberOfImages || 1;
 
-    // Rate limiting
-    const rateLimitError = checkAIRateLimit(c, session.user.id);
-    if (rateLimitError) return rateLimitError;
+  // Rate limiting
+  const rateLimitError = checkAIRateLimit(c, session.user.id);
+  if (rateLimitError) return rateLimitError;
 
-    // Verify project access
-    const { error: projectError } = await verifyProjectAccess(c, projectId, session.user.id);
-    if (projectError) return projectError;
+  // Verify project access
+  const { error: projectError } = await verifyProjectAccess(c, projectId, session.user.id);
+  if (projectError) return projectError;
 
-    // Check credits
-    const creditsRequired = geminiService.estimateCredits({ prompt, model, imageSize, numberOfImages: imageCount });
-    const { error: creditsError, userRecord } = await checkUserCredits(c, session.user.id, creditsRequired);
-    if (creditsError || !userRecord) return creditsError;
+  // Check credits
+  const creditsRequired = geminiService.estimateCredits({
+    prompt,
+    model,
+    imageSize,
+    numberOfImages: imageCount,
+  });
+  const { error: creditsError, userRecord } = await checkUserCredits(
+    c,
+    session.user.id,
+    creditsRequired,
+  );
+  if (creditsError || !userRecord) return creditsError;
 
-    // Generate images
-    const startTime = Date.now();
-    let generateResult: GenerateMultipleImagesResult;
+  // Generate images
+  const startTime = Date.now();
+  let generateResult: GenerateMultipleImagesResult;
 
+  try {
+    generateResult = await geminiService.generateImages({
+      prompt,
+      negativePrompt,
+      model,
+      aspectRatio,
+      imageSize,
+      numberOfImages: imageCount,
+      referenceImages,
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error during image generation";
+    await logUsageFailure({
+      userId: session.user.id,
+      projectId,
+      operation,
+      model: usedModel,
+      durationMs: Date.now() - startTime,
+      errorMessage,
+    });
+    return errors.internal(c, errorMessage);
+  }
+
+  // Upload images to R2
+  const uploadResults: { image: GenerateImageResult; upload: UploadResult; key: string }[] = [];
+
+  for (const image of generateResult.images) {
+    const imageKey = r2Service.generateImageKey(session.user.id, projectId);
     try {
-      generateResult = await geminiService.generateImages({
-        prompt,
-        negativePrompt,
-        model,
-        aspectRatio,
-        imageSize,
-        numberOfImages: imageCount,
-        referenceImages,
+      const uploadResult = await r2Service.upload({
+        key: imageKey,
+        data: image.imageData,
+        contentType: image.mimeType,
+        metadata: { userId: session.user.id, projectId, prompt },
       });
+      uploadResults.push({ image, upload: uploadResult, key: imageKey });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error during image generation";
+      const errorMessage = error instanceof Error ? error.message : "Failed to upload image";
+      console.error("[Generate] R2 upload failed:", error);
       await logUsageFailure({
         userId: session.user.id,
         projectId,
@@ -83,106 +126,86 @@ const generateRoute = new Hono().post(
         durationMs: Date.now() - startTime,
         errorMessage,
       });
-      return errors.internal(c, errorMessage);
+      return errors.internal(c, "Failed to save generated image");
     }
+  }
 
-    // Upload images to R2
-    const uploadResults: { image: GenerateImageResult; upload: UploadResult; key: string }[] = [];
+  // Calculate credits per image (4K costs ~80% more, Pro model only)
+  const isProModel = usedModel.includes("pro");
+  let creditsPerImage = isProModel ? 100 : 50;
+  if (isProModel && imageSize === "4K") {
+    creditsPerImage = Math.round(creditsPerImage * 1.8);
+  }
+  const actualCreditsUsed = creditsPerImage * uploadResults.length;
 
-    for (const image of generateResult.images) {
-      const imageKey = r2Service.generateImageKey(session.user.id, projectId);
-      try {
-        const uploadResult = await r2Service.upload({
-          key: imageKey,
-          data: image.imageData,
-          contentType: image.mimeType,
-          metadata: { userId: session.user.id, projectId, prompt },
-        });
-        uploadResults.push({ image, upload: uploadResult, key: imageKey });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Failed to upload image";
-        console.error("[Generate] R2 upload failed:", error);
-        await logUsageFailure({
-          userId: session.user.id,
+  const imageRecords = await db.transaction(async (tx) => {
+    await tx
+      .update(user)
+      .set({ credits: userRecord.credits - actualCreditsUsed })
+      .where(eq(user.id, session.user.id));
+
+    const records = [];
+    for (const { image, upload, key } of uploadResults) {
+      const [imageRecord] = await tx
+        .insert(aiImages)
+        .values({
           projectId,
-          operation,
+          userId: session.user.id,
+          prompt,
+          negativePrompt,
           model: usedModel,
-          durationMs: Date.now() - startTime,
-          errorMessage,
-        });
-        return errors.internal(c, "Failed to save generated image");
-      }
+          aspectRatio: aspectRatio || "1:1",
+          imageSize: imageSize || "1K",
+          r2Key: key,
+          r2Url: upload.url,
+          width: image.width,
+          height: image.height,
+          fileSize: upload.size,
+          mimeType: image.mimeType,
+          creditsUsed: creditsPerImage,
+          status: "completed",
+        })
+        .returning();
+      records.push(imageRecord);
     }
 
-    // Calculate credits per image (4K costs ~80% more, Pro model only)
-    const isProModel = usedModel.includes("pro");
-    let creditsPerImage = isProModel ? 100 : 50;
-    if (isProModel && imageSize === "4K") {
-      creditsPerImage = Math.round(creditsPerImage * 1.8);
-    }
-    const actualCreditsUsed = creditsPerImage * uploadResults.length;
-
-    const imageRecords = await db.transaction(async (tx) => {
-      await tx
-        .update(user)
-        .set({ credits: userRecord.credits - actualCreditsUsed })
-        .where(eq(user.id, session.user.id));
-
-      const records = [];
-      for (const { image, upload, key } of uploadResults) {
-        const [imageRecord] = await tx
-          .insert(aiImages)
-          .values({
-            projectId,
-            userId: session.user.id,
-            prompt,
-            negativePrompt,
-            model: usedModel,
-            aspectRatio: aspectRatio || "1:1",
-            imageSize: imageSize || "1K",
-            r2Key: key,
-            r2Url: upload.url,
-            width: image.width,
-            height: image.height,
-            fileSize: upload.size,
-            mimeType: image.mimeType,
-            creditsUsed: creditsPerImage,
-            status: "completed",
-          })
-          .returning();
-        records.push(imageRecord);
-      }
-
-      await tx.insert(aiUsageHistory).values({
-        userId: session.user.id,
-        projectId,
-        imageId: records[0].id,
-        operation,
-        model: usedModel,
-        provider: "gemini",
-        creditsCharged: actualCreditsUsed,
-        durationMs: generateResult.totalDurationMs,
-        success: true,
-      });
-
-      return records;
+    await tx.insert(aiUsageHistory).values({
+      userId: session.user.id,
+      projectId,
+      imageId: records[0].id,
+      operation,
+      model: usedModel,
+      provider: "gemini",
+      creditsCharged: actualCreditsUsed,
+      durationMs: generateResult.totalDurationMs,
+      success: true,
     });
 
-    // Return single image for backwards compatibility
-    if (imageRecords.length === 1) {
-      return ok(c, {
+    return records;
+  });
+
+  // Return single image for backwards compatibility
+  if (imageRecords.length === 1) {
+    return ok(
+      c,
+      {
         image: imageRecords[0],
         creditsUsed: actualCreditsUsed,
         creditsRemaining: userRecord.credits - actualCreditsUsed,
-      }, 201);
-    }
+      },
+      201,
+    );
+  }
 
-    return ok(c, {
+  return ok(
+    c,
+    {
       images: imageRecords,
       creditsUsed: actualCreditsUsed,
       creditsRemaining: userRecord.credits - actualCreditsUsed,
-    }, 201);
-  },
-);
+    },
+    201,
+  );
+});
 
 export default generateRoute;

@@ -133,7 +133,10 @@ interface AIStoreCore {
   startGenerating: (taskId: string, shapeId: string, prompt: string) => void;
   completeGenerating: (taskId: string, imageUrl: string, imageId: string) => void;
   failGenerating: (taskId: string, error: string) => void;
-  generateImage: (prompt: string, referenceImages?: string[]) => Promise<{
+  generateImage: (
+    prompt: string,
+    referenceImages?: string[],
+  ) => Promise<{
     taskId: string;
     imageUrl: string;
     imageId: string;
@@ -141,7 +144,10 @@ interface AIStoreCore {
   generateImages: (prompt: string, referenceImages?: string[]) => Promise<GenerateResult>;
   enterInpaintMode: (shapeId: string, imageData: string) => void;
   exitInpaintMode: () => void;
-  inpaintImage: (maskData: string, prompt: string) => Promise<{ imageUrl: string; imageId: string }>;
+  inpaintImage: (
+    maskData: string,
+    prompt: string,
+  ) => Promise<{ imageUrl: string; imageId: string }>;
   clearError: () => void;
   clearHistory: () => void;
 }
@@ -247,7 +253,14 @@ export const useAIStore = create<AIStore>()((set, get, store) => ({
 
     try {
       const response = await api.api["ai-images"].generate.$post({
-        json: { projectId, prompt, model: currentModel.id, aspectRatio, imageSize, referenceImages },
+        json: {
+          projectId,
+          prompt,
+          model: currentModel.id,
+          aspectRatio,
+          imageSize,
+          referenceImages,
+        },
       });
 
       const json = await response.json();
@@ -269,7 +282,8 @@ export const useAIStore = create<AIStore>()((set, get, store) => ({
   },
 
   generateImages: async (prompt: string, referenceImages?: string[]) => {
-    const { currentModel, aspectRatio, imageSize, numberOfImages, canStartNewTask, projectId } = get();
+    const { currentModel, aspectRatio, imageSize, numberOfImages, canStartNewTask, projectId } =
+      get();
 
     if (!projectId) throw new Error("未设置项目 ID");
     if (!canStartNewTask) throw new Error(`最多同时生成 ${MAX_CONCURRENT_TASKS} 张图片`);

@@ -43,3 +43,6 @@ drizzle
 
 # Local development
 .history
+
+# Google Cloud Service Account
+baryon-*.json

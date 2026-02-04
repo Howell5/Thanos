@@ -71,7 +71,9 @@ describe("MockGeminiAIService", () => {
     expect(service.estimateCredits({ prompt: "test" })).toBe(50);
     expect(service.estimateCredits({ prompt: "test", model: "gemini-2.5-flash-image" })).toBe(50);
     // Pro model costs 100
-    expect(service.estimateCredits({ prompt: "test", model: "gemini-3-pro-image-preview" })).toBe(100);
+    expect(service.estimateCredits({ prompt: "test", model: "gemini-3-pro-image-preview" })).toBe(
+      100,
+    );
   });
 
   it("should report configured status", () => {

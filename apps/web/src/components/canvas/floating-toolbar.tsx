@@ -251,9 +251,7 @@ export function FloatingToolbar() {
         onClick={handleInpaint}
         disabled={isUploading}
         className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
-          isUploading
-            ? "cursor-not-allowed text-gray-400"
-            : "text-gray-700 hover:bg-gray-100"
+          isUploading ? "cursor-not-allowed text-gray-400" : "text-gray-700 hover:bg-gray-100"
         }`}
         title={isUploading ? "请等待图片上传完成" : "局部重绘"}
       >

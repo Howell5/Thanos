@@ -105,118 +105,110 @@ function isAllowedImageType(mimeType: string): boolean {
   return (ALLOWED_IMAGE_TYPES as readonly string[]).includes(mimeType);
 }
 
-const uploadRoute = new Hono().post(
-  "/",
-  zValidator("form", uploadImageSchema),
-  async (c) => {
-    // Get session
-    const session = await getSessionOrMock(c);
-    if (!session) {
-      return errors.unauthorized(c);
-    }
+const uploadRoute = new Hono().post("/", zValidator("form", uploadImageSchema), async (c) => {
+  // Get session
+  const session = await getSessionOrMock(c);
+  if (!session) {
+    return errors.unauthorized(c);
+  }
 
-    // Check R2 service availability
-    const r2Service = c.var.r2Service;
-    if (!r2Service.isConfigured()) {
-      return errors.serviceUnavailable(c, "Image storage is not configured");
-    }
+  // Check R2 service availability
+  const r2Service = c.var.r2Service;
+  if (!r2Service.isConfigured()) {
+    return errors.serviceUnavailable(c, "Image storage is not configured");
+  }
 
-    // Get form data
-    const { projectId } = c.req.valid("form");
+  // Get form data
+  const { projectId } = c.req.valid("form");
 
-    // Get file from request
-    const body = await c.req.parseBody();
-    const file = body.file;
+  // Get file from request
+  const body = await c.req.parseBody();
+  const file = body.file;
 
-    if (!file || !(file instanceof File)) {
-      return errors.badRequest(c, "File is required");
-    }
+  if (!file || !(file instanceof File)) {
+    return errors.badRequest(c, "File is required");
+  }
 
-    // Validate file type
-    if (!isAllowedImageType(file.type)) {
-      return errors.badRequest(
-        c,
-        `Invalid file type. Allowed types: ${ALLOWED_IMAGE_TYPES.join(", ")}`,
-      );
-    }
-
-    // Validate file size
-    if (file.size > MAX_UPLOAD_SIZE) {
-      const maxSizeMB = MAX_UPLOAD_SIZE / (1024 * 1024);
-      return errors.badRequest(c, `File size exceeds ${maxSizeMB}MB limit`);
-    }
-
-    // Verify project access
-    const { error: projectError } = await verifyProjectAccess(
+  // Validate file type
+  if (!isAllowedImageType(file.type)) {
+    return errors.badRequest(
       c,
-      projectId,
-      session.user.id,
+      `Invalid file type. Allowed types: ${ALLOWED_IMAGE_TYPES.join(", ")}`,
     );
-    if (projectError) return projectError;
+  }
 
-    // Read file into buffer
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+  // Validate file size
+  if (file.size > MAX_UPLOAD_SIZE) {
+    const maxSizeMB = MAX_UPLOAD_SIZE / (1024 * 1024);
+    return errors.badRequest(c, `File size exceeds ${maxSizeMB}MB limit`);
+  }
 
-    // Get image dimensions
-    const dimensions = getImageDimensions(buffer, file.type);
-    if (!dimensions) {
-      return errors.badRequest(c, "Could not read image dimensions");
-    }
+  // Verify project access
+  const { error: projectError } = await verifyProjectAccess(c, projectId, session.user.id);
+  if (projectError) return projectError;
 
-    // Generate R2 key and upload
-    const imageKey = r2Service.generateImageKey(session.user.id, projectId);
+  // Read file into buffer
+  const arrayBuffer = await file.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
 
-    let uploadResult;
-    try {
-      uploadResult = await r2Service.upload({
-        key: imageKey,
-        data: buffer,
-        contentType: file.type,
-        metadata: {
-          userId: session.user.id,
-          projectId,
-          originalFileName: file.name,
-        },
-      });
-    } catch (error) {
-      console.error("[Upload] R2 upload failed:", error);
-      return errors.internal(c, "Failed to upload image");
-    }
+  // Get image dimensions
+  const dimensions = getImageDimensions(buffer, file.type);
+  if (!dimensions) {
+    return errors.badRequest(c, "Could not read image dimensions");
+  }
 
-    // Save to database
-    const [imageRecord] = await db
-      .insert(aiImages)
-      .values({
-        projectId,
+  // Generate R2 key and upload
+  const imageKey = r2Service.generateImageKey(session.user.id, projectId);
+
+  let uploadResult;
+  try {
+    uploadResult = await r2Service.upload({
+      key: imageKey,
+      data: buffer,
+      contentType: file.type,
+      metadata: {
         userId: session.user.id,
-        source: "upload",
+        projectId,
         originalFileName: file.name,
-        r2Key: imageKey,
-        r2Url: uploadResult.url,
-        width: dimensions.width,
-        height: dimensions.height,
-        fileSize: uploadResult.size,
-        mimeType: file.type,
-        creditsUsed: 0,
-        status: "completed",
-      })
-      .returning();
-
-    return ok(
-      c,
-      {
-        id: imageRecord.id,
-        r2Url: imageRecord.r2Url,
-        width: imageRecord.width,
-        height: imageRecord.height,
-        fileSize: imageRecord.fileSize,
-        mimeType: imageRecord.mimeType,
-        originalFileName: imageRecord.originalFileName,
       },
-      201,
-    );
-  },
-);
+    });
+  } catch (error) {
+    console.error("[Upload] R2 upload failed:", error);
+    return errors.internal(c, "Failed to upload image");
+  }
+
+  // Save to database
+  const [imageRecord] = await db
+    .insert(aiImages)
+    .values({
+      projectId,
+      userId: session.user.id,
+      source: "upload",
+      originalFileName: file.name,
+      r2Key: imageKey,
+      r2Url: uploadResult.url,
+      width: dimensions.width,
+      height: dimensions.height,
+      fileSize: uploadResult.size,
+      mimeType: file.type,
+      creditsUsed: 0,
+      status: "completed",
+    })
+    .returning();
+
+  return ok(
+    c,
+    {
+      id: imageRecord.id,
+      r2Url: imageRecord.r2Url,
+      width: imageRecord.width,
+      height: imageRecord.height,
+      fileSize: imageRecord.fileSize,
+      mimeType: imageRecord.mimeType,
+      originalFileName: imageRecord.originalFileName,
+    },
+    201,
+  );
+});
 
 export default uploadRoute;

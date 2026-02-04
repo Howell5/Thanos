@@ -105,15 +105,13 @@ export async function generateAIImage(params: GenerateImageParams): Promise<Gene
  * Generate a single image using Gemini models
  * Internal function used by generateAIImages
  */
-async function generateSingleImage(
-  params: GenerateImageParams,
-): Promise<GenerateImageResult> {
+async function generateSingleImage(params: GenerateImageParams): Promise<GenerateImageResult> {
   const startTime = Date.now();
   const model = params.model || DEFAULT_MODEL;
   const aspectRatio = params.aspectRatio || "1:1";
   // imageSize only supported by Gemini 3 Pro, Flash always outputs 1K
   const isProModel = model.includes("pro");
-  const imageSize = isProModel ? (params.imageSize || "1K") : "1K";
+  const imageSize = isProModel ? params.imageSize || "1K" : "1K";
   const dimensions = calculateDimensions(aspectRatio, imageSize);
 
   const ai = getGeminiClient();
@@ -154,7 +152,17 @@ async function generateSingleImage(
     aspectRatio: "1:1" | "3:2" | "2:3" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9";
     imageSize?: "1K" | "2K" | "4K";
   } = {
-    aspectRatio: aspectRatio as "1:1" | "3:2" | "2:3" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9",
+    aspectRatio: aspectRatio as
+      | "1:1"
+      | "3:2"
+      | "2:3"
+      | "3:4"
+      | "4:3"
+      | "4:5"
+      | "5:4"
+      | "9:16"
+      | "16:9"
+      | "21:9",
   };
 
   // Only add imageSize for Pro model
@@ -228,9 +236,7 @@ export async function generateAIImages(
   });
 
   // Generate images in parallel
-  const promises = Array.from({ length: numberOfImages }, () =>
-    generateSingleImage(params),
-  );
+  const promises = Array.from({ length: numberOfImages }, () => generateSingleImage(params));
 
   const images = await Promise.all(promises);
 

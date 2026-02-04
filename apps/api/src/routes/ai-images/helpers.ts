@@ -3,8 +3,8 @@
  * Common utilities and validation functions for AI image routes
  */
 
-import type { Context } from "hono";
 import { and, eq, isNull } from "drizzle-orm";
+import type { Context } from "hono";
 import { db } from "../../db";
 import { aiUsageHistory, projects, user } from "../../db/schema";
 import {
@@ -31,15 +31,9 @@ export interface Session {
  * Returns error response if rate limited, null otherwise
  */
 export function checkAIRateLimit(c: Context, userId: string) {
-  const rateLimit = checkRateLimit(
-    getAIGenerationRateLimitKey(userId),
-    AI_GENERATION_LIMIT,
-  );
+  const rateLimit = checkRateLimit(getAIGenerationRateLimitKey(userId), AI_GENERATION_LIMIT);
   if (rateLimit.limited) {
-    return errors.tooManyRequests(
-      c,
-      "AI generation rate limit exceeded. Please try again later.",
-    );
+    return errors.tooManyRequests(c, "AI generation rate limit exceeded. Please try again later.");
   }
   return null;
 }
@@ -48,11 +42,7 @@ export function checkAIRateLimit(c: Context, userId: string) {
  * Verify project ownership and return project
  * Returns error response if project not found or access denied
  */
-export async function verifyProjectAccess(
-  c: Context,
-  projectId: string,
-  userId: string,
-) {
+export async function verifyProjectAccess(c: Context, projectId: string, userId: string) {
   const project = await db.query.projects.findFirst({
     where: and(eq(projects.id, projectId), isNull(projects.deletedAt)),
   });

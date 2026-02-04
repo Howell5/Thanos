@@ -9,7 +9,7 @@ import type {
   GenerateMultipleImagesResult,
   InpaintImageParams,
 } from "../lib/gemini-ai";
-import type { UploadOptions, UploadResult } from "../lib/r2";
+import type { PresignedUploadResult, UploadOptions, UploadResult } from "../lib/r2";
 
 /**
  * Gemini AI Service Interface
@@ -30,6 +30,11 @@ export interface IR2Service {
   upload(options: UploadOptions): Promise<UploadResult>;
   delete(key: string): Promise<void>;
   generateImageKey(userId: string, projectId: string): string;
+  generatePresignedUploadUrl(
+    key: string,
+    contentType: string,
+    expiresIn?: number,
+  ): Promise<PresignedUploadResult>;
   isConfigured(): boolean;
 }
 
