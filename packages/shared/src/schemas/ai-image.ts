@@ -2,8 +2,16 @@ import { z } from "zod";
 
 /**
  * AI Image schemas
- * For generating and managing AI-generated images
+ * For generating and managing AI-generated images and user-uploaded images
  */
+
+/**
+ * Image source type
+ * - "ai": AI-generated image
+ * - "upload": User-uploaded image
+ */
+export const imageSourceSchema = z.enum(["ai", "upload"]);
+export type ImageSource = z.infer<typeof imageSourceSchema>;
 
 /**
  * Supported aspect ratios
@@ -106,13 +114,55 @@ export type OutpaintImage = z.infer<typeof outpaintImageSchema>;
  */
 export interface AIImageResponse {
   id: string;
-  prompt: string;
+  source: ImageSource;
+  prompt?: string;
   negativePrompt?: string;
-  model: string;
-  aspectRatio: string;
+  model?: string;
+  aspectRatio?: string;
+  originalFileName?: string;
   r2Url: string;
   width: number;
   height: number;
   creditsUsed: number;
   createdAt: string;
+}
+
+/**
+ * Schema for uploading an image
+ */
+export const uploadImageSchema = z.object({
+  projectId: z.string().uuid(),
+});
+
+export type UploadImage = z.infer<typeof uploadImageSchema>;
+
+/**
+ * Maximum file size for image upload (10MB)
+ */
+export const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
+
+/**
+ * Allowed MIME types for image upload
+ */
+export const ALLOWED_IMAGE_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+  "image/gif",
+] as const;
+
+export type AllowedImageType = (typeof ALLOWED_IMAGE_TYPES)[number];
+
+/**
+ * Upload image response
+ */
+export interface UploadImageResponse {
+  id: string;
+  r2Url: string;
+  width: number;
+  height: number;
+  fileSize: number;
+  mimeType: string;
+  originalFileName: string;
 }

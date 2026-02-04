@@ -143,28 +143,37 @@ export function FloatingToolbar() {
 
   // Download image
   const handleDownload = async () => {
-    const dataUrl = getSelectedImageDataUrl();
-    if (!dataUrl) return;
+    const meta = getSelectedImageMeta();
+
+    // For uploading images, use the local preview URL if available
+    let downloadUrl: string | null = null;
+    if (meta?.source === "uploading" && meta.localPreviewUrl) {
+      downloadUrl = meta.localPreviewUrl;
+    } else {
+      downloadUrl = getSelectedImageDataUrl();
+    }
+
+    if (!downloadUrl) return;
 
     try {
       // Handle both data URLs and regular URLs
       let blob: Blob;
 
-      if (dataUrl.startsWith("data:")) {
+      if (downloadUrl.startsWith("data:")) {
         // Convert data URL to blob
-        const response = await fetch(dataUrl);
+        const response = await fetch(downloadUrl);
         blob = await response.blob();
       } else {
         // Fetch from URL
-        const response = await fetch(dataUrl);
+        const response = await fetch(downloadUrl);
         blob = await response.blob();
       }
 
-      // Create download link
+      // Create download link with original filename if available
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `image-${Date.now()}.png`;
+      link.download = meta?.originalFileName || `image-${Date.now()}.png`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -179,16 +188,23 @@ export function FloatingToolbar() {
     const dataUrl = getSelectedImageDataUrl();
     if (!dataUrl || !selectedImageId) return;
 
-    // Check if this is a generating placeholder
+    // Check if this is a generating placeholder or uploading
     const meta = getSelectedImageMeta();
     if (meta?.source === "generating") {
       alert("请等待图片生成完成");
+      return;
+    }
+    if (meta?.source === "uploading") {
+      alert("请等待图片上传完成");
       return;
     }
 
     // Enter inpaint mode with the selected image
     enterInpaintMode(selectedImageId, dataUrl);
   };
+
+  // Check if current image is uploading
+  const isUploading = getSelectedImageMeta()?.source === "uploading";
 
   // Hide toolbar when no image selected, no position, during drag, or in edit mode
   if (!selectedImageId || !toolbarPosition || isDragging || editMode !== "normal") {
@@ -233,8 +249,13 @@ export function FloatingToolbar() {
       {/* Inpaint */}
       <button
         onClick={handleInpaint}
-        className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
-        title="局部重绘"
+        disabled={isUploading}
+        className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+          isUploading
+            ? "cursor-not-allowed text-gray-400"
+            : "text-gray-700 hover:bg-gray-100"
+        }`}
+        title={isUploading ? "请等待图片上传完成" : "局部重绘"}
       >
         <Paintbrush className="h-4 w-4" />
         <span>局部重绘</span>

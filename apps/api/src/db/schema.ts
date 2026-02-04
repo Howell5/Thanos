@@ -134,8 +134,8 @@ export const projects = pgTable("projects", {
 });
 
 /**
- * AI Generated Images table
- * Tracks all AI-generated images within projects
+ * Images table
+ * Tracks all images within projects (both AI-generated and user-uploaded)
  */
 export const aiImages = pgTable("ai_images", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -145,11 +145,15 @@ export const aiImages = pgTable("ai_images", {
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
-  // Generation parameters
-  prompt: text("prompt").notNull(),
+  // Source: "ai" for AI-generated, "upload" for user-uploaded
+  source: text("source").notNull().default("ai"),
+  // Generation parameters (null for uploaded images)
+  prompt: text("prompt"),
   negativePrompt: text("negative_prompt"),
-  model: text("model").notNull(),
-  aspectRatio: text("aspect_ratio").notNull(),
+  model: text("model"),
+  aspectRatio: text("aspect_ratio"),
+  // Upload info (null for AI-generated images)
+  originalFileName: text("original_file_name"),
   // Storage info
   r2Key: text("r2_key").notNull().unique(),
   r2Url: text("r2_url").notNull(),
@@ -157,8 +161,8 @@ export const aiImages = pgTable("ai_images", {
   height: integer("height").notNull(),
   fileSize: integer("file_size").notNull(),
   mimeType: text("mime_type").notNull().default("image/png"),
-  // Cost tracking
-  creditsUsed: integer("credits_used").notNull(),
+  // Cost tracking (0 for uploaded images)
+  creditsUsed: integer("credits_used").notNull().default(0),
   inputTokens: integer("input_tokens"),
   outputTokens: integer("output_tokens"),
   // Status

@@ -9,28 +9,49 @@ import {
 // Re-export position utilities
 export { findNonOverlappingPosition } from "./canvas-position";
 
-// Custom asset store for handling image uploads
+// Upload function type for R2 uploads
+type UploadToR2Fn = (file: File) => Promise<{ r2Url: string; id: string }>;
+
+// Custom asset store for handling image uploads with R2
+// This integrates with tldraw's native drag-and-drop handling
+export const createImageAssetStoreWithUpload = (uploadToR2: UploadToR2Fn): TLAssetStore => {
+  return {
+    // Upload asset to R2 when files are dropped
+    async upload(_asset, file) {
+      try {
+        // Upload to R2
+        const result = await uploadToR2(file);
+        return { src: result.r2Url };
+      } catch (error) {
+        console.error("Failed to upload to R2:", error);
+        // Fallback to base64 data URL if upload fails
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve({ src: reader.result as string });
+          reader.onerror = () => reject(new Error("Failed to read file"));
+          reader.readAsDataURL(file);
+        });
+      }
+    },
+
+    // Resolve asset URL (return as-is)
+    resolve(asset) {
+      return asset.props.src;
+    },
+  };
+};
+
+// Legacy asset store (base64 only, no R2 upload)
 export const createImageAssetStore = (): TLAssetStore => {
   return {
-    // Upload asset (convert File to base64 data URL for now)
     async upload(_asset, file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
-
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
-          resolve({ src: dataUrl });
-        };
-
-        reader.onerror = () => {
-          reject(new Error("Failed to read file"));
-        };
-
+        reader.onload = () => resolve({ src: reader.result as string });
+        reader.onerror = () => reject(new Error("Failed to read file"));
         reader.readAsDataURL(file);
       });
     },
-
-    // Resolve asset URL (return as-is since we're using data URLs)
     resolve(asset) {
       return asset.props.src;
     },
@@ -39,8 +60,8 @@ export const createImageAssetStore = (): TLAssetStore => {
 
 // Metadata for AI-generated images
 export interface ImageMeta {
-  source: "ai-generated" | "uploaded" | "generating";
-  // Task ID for generating images
+  source: "ai-generated" | "uploaded" | "generating" | "uploading";
+  // Task ID for generating or uploading images
   taskId?: string;
   // AI generation info (only for ai-generated)
   modelId?: string;
@@ -54,96 +75,13 @@ export interface ImageMeta {
   // Image dimensions (for all images)
   originalWidth?: number;
   originalHeight?: number;
+  // Upload info (for uploading images)
+  uploadTaskId?: string;
+  localPreviewUrl?: string; // Temporary base64 preview during upload
+  originalFileName?: string;
   // Index signature for JsonObject compatibility
   [key: string]: string | number | boolean | undefined;
 }
-
-// Options for adding image to canvas
-interface AddImageOptions {
-  // Custom position. If anchorLeft is true, x is left edge; otherwise x is center
-  position?: { x: number; y: number; anchorLeft?: boolean };
-  // Metadata to attach to the shape
-  meta?: ImageMeta;
-}
-
-// Helper function to add an image to the canvas
-export const addImageToCanvas = async (editor: Editor, file: File, options?: AddImageOptions) => {
-  // Get position: custom or center of viewport
-  const { x, y } = options?.position ?? editor.getViewportScreenCenter();
-
-  // Create asset ID
-  const assetId = AssetRecordType.createId();
-
-  // Read file as data URL
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-
-  // Get image dimensions
-  const dimensions = await getImageDimensions(dataUrl);
-
-  // Create asset
-  editor.createAssets([
-    {
-      id: assetId,
-      type: "image",
-      typeName: "asset",
-      props: {
-        name: file.name,
-        src: dataUrl,
-        w: dimensions.width,
-        h: dimensions.height,
-        mimeType: file.type,
-        isAnimated: false,
-      },
-      meta: {},
-    },
-  ]);
-
-  // Create image shape at center of viewport
-  const maxWidth = 800;
-  const maxHeight = 600;
-  let width = dimensions.width;
-  let height = dimensions.height;
-
-  // Scale down if too large
-  if (width > maxWidth || height > maxHeight) {
-    const scale = Math.min(maxWidth / width, maxHeight / height);
-    width *= scale;
-    height *= scale;
-  }
-
-  // Calculate final position
-  const anchorLeft = options?.position?.anchorLeft ?? false;
-  const finalX = anchorLeft ? x : x - width / 2;
-  const finalY = y - height / 2;
-
-  // Build meta with defaults for uploaded images
-  const meta: ImageMeta = options?.meta ?? {
-    source: "uploaded",
-    originalWidth: dimensions.width,
-    originalHeight: dimensions.height,
-  };
-
-  // Always include original dimensions
-  if (!meta.originalWidth) meta.originalWidth = dimensions.width;
-  if (!meta.originalHeight) meta.originalHeight = dimensions.height;
-
-  editor.createShape({
-    type: "image",
-    x: finalX,
-    y: finalY,
-    props: {
-      assetId,
-      w: width,
-      h: height,
-    },
-    meta: meta as ImageMeta,
-  });
-};
 
 // Get image dimensions from data URL or URL
 export const getImageDimensions = (url: string): Promise<{ width: number; height: number }> => {
@@ -162,7 +100,6 @@ export const getImageDimensions = (url: string): Promise<{ width: number; height
 export const isImageFile = (file: File): boolean => {
   return file.type.startsWith("image/");
 };
-
 
 // A 1x1 transparent PNG as placeholder
 const PLACEHOLDER_IMAGE =

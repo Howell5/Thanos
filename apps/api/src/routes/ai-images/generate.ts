@@ -100,6 +100,7 @@ const generateRoute = new Hono().post(
         uploadResults.push({ image, upload: uploadResult, key: imageKey });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Failed to upload image";
+        console.error("[Generate] R2 upload failed:", error);
         await logUsageFailure({
           userId: session.user.id,
           projectId,

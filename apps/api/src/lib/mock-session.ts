@@ -39,8 +39,6 @@ export type SessionData = {
   user: typeof MOCK_USER;
 };
 
-let mockUserEnsured = false;
-
 /**
  * Check if mock session is enabled
  * Only works in development mode
@@ -55,24 +53,29 @@ export function isMockSessionEnabled(): boolean {
  * Creates the mock user if it doesn't exist
  */
 async function ensureMockUser(): Promise<void> {
-  if (mockUserEnsured) return;
-
+  // Always check database to handle cases where DB was reset but process wasn't
   const existingUser = await db.query.user.findFirst({
     where: eq(user.id, MOCK_USER_ID),
   });
 
   if (!existingUser) {
-    await db.insert(user).values({
-      id: MOCK_USER_ID,
-      name: MOCK_USER.name,
-      email: MOCK_USER.email,
-      emailVerified: new Date(),
-      credits: 10000, // Give dev user plenty of credits
-    });
-    console.log("🔧 Created mock user for development");
+    try {
+      await db.insert(user).values({
+        id: MOCK_USER_ID,
+        name: MOCK_USER.name,
+        email: MOCK_USER.email,
+        emailVerified: new Date(),
+        credits: 10000, // Give dev user plenty of credits
+      });
+      console.log("🔧 Created mock user for development");
+    } catch (error) {
+      // Handle race condition where another request created the user
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (!errorMessage.includes("duplicate key")) {
+        throw error;
+      }
+    }
   }
-
-  mockUserEnsured = true;
 }
 
 /**

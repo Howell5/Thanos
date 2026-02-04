@@ -10,7 +10,10 @@ import {
 import "tldraw/tldraw.css";
 import { Button } from "@/components/ui/button";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
-import { addImageToCanvas, createImageAssetStore, isImageFile } from "@/lib/image-assets";
+import {
+  type ImageMeta,
+  createImageAssetStoreWithUpload,
+} from "@/lib/image-assets";
 import { ROUTES } from "@/lib/routes";
 import { useAIStore } from "@/stores/use-ai-store";
 import { ArrowLeft, Save } from "lucide-react";
@@ -21,6 +24,7 @@ import { BottomPromptPanel } from "./bottom-prompt-panel";
 import { FloatingToolbar } from "./floating-toolbar";
 import { GeneratingOverlay } from "./generating-overlay";
 import { InpaintingOverlay } from "./inpainting-overlay";
+import { UploadingOverlay } from "./uploading-overlay";
 
 interface TldrawCanvasProps {
   projectId: string;
@@ -37,45 +41,36 @@ let canvasPropsStore: {
   isSaving: boolean;
 } | null = null;
 
-// Component to handle drag and drop and keyboard shortcuts
-function DropHandler() {
+// Component to handle keyboard shortcuts and upload cleanup
+function CanvasEventHandler() {
   const editor = useEditor();
+  const { cancelUpload } = useAIStore();
 
   // Add keyboard shortcuts
   useKeyboardShortcuts(editor);
 
+  // Listen for shape deletions to cancel upload tasks
   useEffect(() => {
-    const handleDrop = async (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      const files = Array.from(e.dataTransfer?.files || []);
-      const imageFiles = files.filter(isImageFile);
-
-      for (const file of imageFiles) {
-        try {
-          await addImageToCanvas(editor, file);
-        } catch (error) {
-          console.error("Failed to add image:", error);
+    const unsubscribe = editor.store.listen(
+      (entry) => {
+        // Check for deleted shapes
+        for (const record of Object.values(entry.changes.removed)) {
+          if (record.typeName === "shape" && "meta" in record) {
+            const meta = record.meta as unknown as ImageMeta;
+            // If it was an uploading shape, cancel the upload task
+            if (meta?.source === "uploading" && meta.uploadTaskId) {
+              cancelUpload(meta.uploadTaskId);
+            }
+          }
         }
-      }
-    };
-
-    const handleDragOver = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-    };
-
-    // Add event listeners to the editor container
-    const container = editor.getContainer();
-    container.addEventListener("drop", handleDrop);
-    container.addEventListener("dragover", handleDragOver);
+      },
+      { source: "user", scope: "document" },
+    );
 
     return () => {
-      container.removeEventListener("drop", handleDrop);
-      container.removeEventListener("dragover", handleDragOver);
+      unsubscribe();
     };
-  }, [editor]);
+  }, [editor, cancelUpload]);
 
   return null;
 }
@@ -90,6 +85,7 @@ function InFrontOfTheCanvas() {
       <BottomPromptPanel />
       <GeneratingOverlay />
       <InpaintingOverlay />
+      <UploadingOverlay />
       {/* Top Bar - positioned at top left */}
       {/* Note: pointer-events-auto is needed because tldraw's InFrontOfTheCanvas has pointer-events: none */}
       <div className="pointer-events-auto fixed left-4 top-4 z-[300] flex items-center gap-2">
@@ -198,7 +194,7 @@ function CanvasInner({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [editor, onSave]);
 
-  return <DropHandler />;
+  return <CanvasEventHandler />;
 }
 
 export function TldrawCanvas({
@@ -208,8 +204,18 @@ export function TldrawCanvas({
   onSave,
   isSaving,
 }: TldrawCanvasProps) {
-  const assetStore = useMemo(() => createImageAssetStore(), []);
-  const { setProjectId } = useAIStore();
+  const { setProjectId, uploadImage } = useAIStore();
+
+  // Create asset store with R2 upload support
+  // This integrates with tldraw's native drag-and-drop
+  const assetStore = useMemo(
+    () =>
+      createImageAssetStoreWithUpload(async (file) => {
+        const result = await uploadImage(file, "");
+        return { r2Url: result.r2Url, id: result.id };
+      }),
+    [uploadImage],
+  );
   const editorRef = useRef<Editor | null>(null);
   const hasUnsavedChangesRef = useRef(false);
 
@@ -246,10 +252,12 @@ export function TldrawCanvas({
     }
   }, [onSave]);
 
-  // Auto-save warning on beforeunload
+  // Auto-save warning on beforeunload (also warn if uploads in progress)
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (hasUnsavedChangesRef.current) {
+      // Check for unsaved changes or uploads in progress
+      const { uploadingCount } = useAIStore.getState();
+      if (hasUnsavedChangesRef.current || uploadingCount > 0) {
         e.preventDefault();
         e.returnValue = "";
       }
