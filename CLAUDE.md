@@ -243,6 +243,8 @@ R2_SECRET_ACCESS_KEY=...
 - Services accessed via `c.var.geminiService` and `c.var.r2Service` in route handlers
 - Multi-image generation uses parallel API calls (Gemini `generateContent` doesn't support batch)
 - Zustand store slices: Use selectors for computed values (getters don't work in slices)
+- **Canvas Event System** (`lib/canvas-events.ts`): Use `requestCanvasSave()` to trigger immediate save after important operations (upload complete, AI generation, inpaint). Auto-save uses 2-second debounce for user edits; event-triggered saves are immediate.
+- **Image Display Size**: All images on canvas are limited to max edge size initially (see `DEFAULT_MAX_IMAGE_SIZE` in `lib/image-assets.ts`). Applies to AI generation, uploads, drag-and-drop, and paste.
 
 ## Project Structure
 
@@ -299,6 +301,8 @@ berryon/
 │       │   ├── lib/
 │       │   │   ├── api.ts      # Typed Hono client + ApiError + auto toast
 │       │   │   ├── auth-client.ts  # Better Auth client
+│       │   │   ├── canvas-events.ts # Canvas event system for cross-component save triggers
+│       │   │   ├── image-assets.ts  # Image utilities, size limits, placeholder handling
 │       │   │   ├── query-client.ts # TanStack Query setup
 │       │   │   └── utils.ts    # Utilities (cn helper)
 │       │   ├── pages/          # Page components (orders.tsx, etc.)

@@ -1,42 +1,62 @@
-import { DefaultToolbar, type Editor, type TLUiComponents, Tldraw, getSnapshot, loadSnapshot, useEditor } from 'tldraw'
-import 'tldraw/tldraw.css'
-import { Button } from '@/components/ui/button'
-import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
-import { type ImageMeta, createImageAssetStoreWithUpload } from '@/lib/image-assets'
-import { ROUTES } from '@/lib/routes'
-import { selectUploadingCount, useAIStore } from '@/stores/use-ai-store'
-import { ArrowLeft, Save } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { Link } from 'react-router-dom'
-import { toast } from 'sonner'
-import { BottomPromptPanel } from './bottom-prompt-panel'
-import { FloatingToolbar } from './floating-toolbar'
-import { GeneratingOverlay } from './generating-overlay'
-import { InpaintingOverlay } from './inpainting-overlay'
-import { UploadingOverlay } from './uploading-overlay'
+import {
+  DefaultToolbar,
+  type Editor,
+  type TLUiComponents,
+  Tldraw,
+  getSnapshot,
+  loadSnapshot,
+  useEditor,
+} from "tldraw";
+import "tldraw/tldraw.css";
+import { Button } from "@/components/ui/button";
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import { onCanvasSaveRequest, requestCanvasSave } from "@/lib/canvas-events";
+import {
+  DEFAULT_MAX_IMAGE_SIZE,
+  type ImageMeta,
+  createImageAssetStoreWithUpload,
+} from "@/lib/image-assets";
+import { ROUTES } from "@/lib/routes";
+import { selectUploadingCount, useAIStore } from "@/stores/use-ai-store";
+import { ArrowLeft, Check, Loader2, Save } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { toast } from "sonner";
+import { BottomPromptPanel } from "./bottom-prompt-panel";
+
+// Auto-save debounce delay in milliseconds
+const AUTO_SAVE_DELAY = 2000;
+import { FloatingToolbar } from "./floating-toolbar";
+import { GeneratingOverlay } from "./generating-overlay";
+import { InpaintingOverlay } from "./inpainting-overlay";
+import { UploadingOverlay } from "./uploading-overlay";
 
 interface TldrawCanvasProps {
-  projectId: string
-  projectName: string
-  canvasData?: unknown
-  onSave: (data: { document: unknown; session: unknown }) => Promise<void>
-  isSaving: boolean
+  projectId: string;
+  projectName: string;
+  canvasData?: unknown;
+  onSave: (data: { document: unknown; session: unknown }) => Promise<void>;
+  isSaving: boolean;
 }
+
+// Save status for UI feedback
+type SaveStatus = "idle" | "saving" | "saved";
 
 // Store for passing props to InFrontOfTheCanvas
 let canvasPropsStore: {
-  projectName: string
-  onSave: () => void
-  isSaving: boolean
-} | null = null
+  projectName: string;
+  onSave: () => void;
+  isSaving: boolean;
+  saveStatus: SaveStatus;
+} | null = null;
 
 // Component to handle keyboard shortcuts and upload cleanup
 function CanvasEventHandler() {
-  const editor = useEditor()
-  const { cancelUpload } = useAIStore()
+  const editor = useEditor();
+  const { cancelUpload } = useAIStore();
 
   // Add keyboard shortcuts
-  useKeyboardShortcuts(editor)
+  useKeyboardShortcuts(editor);
 
   // Listen for shape deletions to cancel upload tasks
   useEffect(() => {
@@ -44,29 +64,29 @@ function CanvasEventHandler() {
       (entry) => {
         // Check for deleted shapes
         for (const record of Object.values(entry.changes.removed)) {
-          if (record.typeName === 'shape' && 'meta' in record) {
-            const meta = record.meta as unknown as ImageMeta
+          if (record.typeName === "shape" && "meta" in record) {
+            const meta = record.meta as unknown as ImageMeta;
             // If it was an uploading shape, cancel the upload task
-            if (meta?.source === 'uploading' && meta.uploadTaskId) {
-              cancelUpload(meta.uploadTaskId)
+            if (meta?.source === "uploading" && meta.uploadTaskId) {
+              cancelUpload(meta.uploadTaskId);
             }
           }
         }
       },
-      { source: 'user', scope: 'document' },
-    )
+      { source: "user", scope: "document" },
+    );
 
     return () => {
-      unsubscribe()
-    }
-  }, [editor, cancelUpload])
+      unsubscribe();
+    };
+  }, [editor, cancelUpload]);
 
-  return null
+  return null;
 }
 
 // Component rendered in front of the canvas (highest z-index)
 function InFrontOfTheCanvas() {
-  const props = canvasPropsStore
+  const props = canvasPropsStore;
 
   return (
     <>
@@ -77,26 +97,53 @@ function InFrontOfTheCanvas() {
       <UploadingOverlay />
       {/* Top Bar - positioned at top left */}
       {/* Note: pointer-events-auto is needed because tldraw's InFrontOfTheCanvas has pointer-events: none */}
-      <div className='pointer-events-auto fixed left-4 top-4 z-[300] flex items-center gap-2'>
-        <Button asChild variant='outline' size='sm' className='border-gray-200 bg-white shadow-sm hover:bg-gray-50'>
+      <div className="pointer-events-auto fixed left-4 top-4 z-[300] flex items-center gap-2">
+        <Button
+          asChild
+          variant="outline"
+          size="sm"
+          className="border-gray-200 bg-white shadow-sm hover:bg-gray-50"
+        >
           <Link to={ROUTES.PROJECTS}>
-            <ArrowLeft className='mr-1.5 h-4 w-4' />
+            <ArrowLeft className="mr-1.5 h-4 w-4" />
             返回
           </Link>
         </Button>
-        <div className='rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium shadow-sm'>{props?.projectName}</div>
-        <Button variant='outline' size='sm' onClick={props?.onSave} disabled={props?.isSaving} className='border-gray-200 bg-white shadow-sm hover:bg-gray-50'>
-          <Save className='mr-1.5 h-4 w-4' />
-          {props?.isSaving ? '保存中...' : '保存'}
+        <div className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium shadow-sm">
+          {props?.projectName}
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={props?.onSave}
+          disabled={props?.isSaving || props?.saveStatus === "saving"}
+          className="border-gray-200 bg-white shadow-sm hover:bg-gray-50"
+        >
+          {props?.saveStatus === "saving" ? (
+            <>
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              保存中
+            </>
+          ) : props?.saveStatus === "saved" ? (
+            <>
+              <Check className="mr-1.5 h-4 w-4 text-green-600" />
+              已保存
+            </>
+          ) : (
+            <>
+              <Save className="mr-1.5 h-4 w-4" />
+              保存
+            </>
+          )}
         </Button>
       </div>
     </>
-  )
+  );
 }
 
 // Vertical toolbar component
 function VerticalToolbar() {
-  return <DefaultToolbar orientation='vertical' />
+  return <DefaultToolbar orientation="vertical" />;
 }
 
 // UI components configuration - hide unnecessary tldraw UI elements
@@ -121,127 +168,254 @@ const uiComponents: Partial<TLUiComponents> = {
   Minimap: null,
   // Hide native image toolbar (we have custom FloatingToolbar)
   ImageToolbar: null,
-}
+};
 
 // Check if canvasData has valid snapshot format
 function isValidSnapshot(data: unknown): data is { document: unknown } {
-  return data !== null && typeof data === 'object' && 'document' in data && data.document !== null && typeof data.document === 'object'
+  return (
+    data !== null &&
+    typeof data === "object" &&
+    "document" in data &&
+    data.document !== null &&
+    typeof data.document === "object"
+  );
 }
 
 // Inner component that has access to the editor
-function CanvasInner({ canvasData, onSave }: { canvasData?: unknown; onSave: (data: { document: unknown; session: unknown }) => Promise<void> }) {
-  const editor = useEditor()
-  const hasLoadedRef = useRef(false)
+function CanvasInner({
+  canvasData,
+  onSave,
+}: {
+  canvasData?: unknown;
+  onSave: (data: { document: unknown; session: unknown }) => Promise<void>;
+}) {
+  const editor = useEditor();
+  const hasLoadedRef = useRef(false);
 
   // Load canvas data on mount
   useEffect(() => {
     if (!hasLoadedRef.current && isValidSnapshot(canvasData)) {
       try {
-        loadSnapshot(editor.store, canvasData as Parameters<typeof loadSnapshot>[1])
-        hasLoadedRef.current = true
+        loadSnapshot(editor.store, canvasData as Parameters<typeof loadSnapshot>[1]);
+        hasLoadedRef.current = true;
       } catch (e) {
-        console.error('Failed to load canvas data:', e)
+        console.error("Failed to load canvas data:", e);
       }
     }
-  }, [editor, canvasData])
+  }, [editor, canvasData]);
 
   // Expose save function
   useEffect(() => {
     const handleSave = async () => {
-      const { document, session } = getSnapshot(editor.store)
-      await onSave({ document, session })
-    }
+      const { document, session } = getSnapshot(editor.store);
+      await onSave({ document, session });
+    };
 
     // Listen for Cmd/Ctrl + S
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
-      const modifier = isMac ? e.metaKey : e.ctrlKey
-      if (modifier && e.key === 's') {
-        e.preventDefault()
-        handleSave()
+      const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+      const modifier = isMac ? e.metaKey : e.ctrlKey;
+      if (modifier && e.key === "s") {
+        e.preventDefault();
+        handleSave();
       }
-    }
+    };
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [editor, onSave])
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [editor, onSave]);
 
-  return <CanvasEventHandler />
+  return <CanvasEventHandler />;
 }
 
-export function TldrawCanvas({ projectId, projectName, canvasData, onSave, isSaving }: TldrawCanvasProps) {
-  const { setProjectId, uploadImage } = useAIStore()
+export function TldrawCanvas({
+  projectId,
+  projectName,
+  canvasData,
+  onSave,
+  isSaving,
+}: TldrawCanvasProps) {
+  const { setProjectId, uploadImage } = useAIStore();
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
   // Create asset store with R2 upload support
   // This integrates with tldraw's native drag-and-drop
   const assetStore = useMemo(
     () =>
       createImageAssetStoreWithUpload(async (file) => {
-        const result = await uploadImage(file, '')
-        return { r2Url: result.r2Url, id: result.id }
+        const result = await uploadImage(file, "");
+        // Trigger save after upload completes
+        requestCanvasSave();
+        return { r2Url: result.r2Url, id: result.id };
       }),
     [uploadImage],
-  )
-  const editorRef = useRef<Editor | null>(null)
-  const hasUnsavedChangesRef = useRef(false)
+  );
+  const editorRef = useRef<Editor | null>(null);
+  const hasUnsavedChangesRef = useRef(false);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Set project ID for AI store
   useEffect(() => {
-    setProjectId(projectId)
-  }, [projectId, setProjectId])
+    setProjectId(projectId);
+  }, [projectId, setProjectId]);
 
-  // Track unsaved changes
-  const handleMount = useCallback((editor: Editor) => {
-    editorRef.current = editor
+  // Internal save function (silent, for auto-save)
+  const performSave = useCallback(
+    async (showToast: boolean) => {
+      if (!editorRef.current) return;
 
-    // Track changes
-    const unsubscribe = editor.store.listen(() => {
-      hasUnsavedChangesRef.current = true
-    })
+      setSaveStatus("saving");
+      try {
+        const { document, session } = getSnapshot(editorRef.current.store);
+        await onSave({ document, session });
+        hasUnsavedChangesRef.current = false;
+        setSaveStatus("saved");
 
+        // Show toast only for manual save
+        if (showToast) {
+          toast.success("保存成功");
+        }
+
+        // Reset status after 2 seconds
+        savedStatusTimerRef.current = setTimeout(() => {
+          setSaveStatus("idle");
+        }, 2000);
+      } catch {
+        setSaveStatus("idle");
+        // Error toast is handled by the mutation for manual save
+      }
+    },
+    [onSave],
+  );
+
+  // Manual save handler (with toast)
+  const handleSave = useCallback(() => {
+    // Clear any pending auto-save
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    performSave(true);
+  }, [performSave]);
+
+  // Auto-save function (debounced, silent)
+  const scheduleAutoSave = useCallback(() => {
+    // Clear existing timer
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+
+    // Schedule new auto-save
+    autoSaveTimerRef.current = setTimeout(() => {
+      if (hasUnsavedChangesRef.current) {
+        performSave(false);
+      }
+    }, AUTO_SAVE_DELAY);
+  }, [performSave]);
+
+  // Track unsaved changes and trigger auto-save
+  const handleMount = useCallback(
+    (editor: Editor) => {
+      editorRef.current = editor;
+
+      // Track changes and schedule auto-save
+      const unsubscribeChanges = editor.store.listen(
+        () => {
+          hasUnsavedChangesRef.current = true;
+          scheduleAutoSave();
+        },
+        { source: "user", scope: "document" },
+      );
+
+      // Auto-resize large images dropped onto canvas
+      // This catches tldraw's native drag-and-drop which creates shapes at original size
+      const unsubscribeResize = editor.sideEffects.registerAfterCreateHandler("shape", (shape) => {
+        if (shape.type !== "image") return;
+
+        const imageShape = shape as { props: { w: number; h: number } };
+        const { w, h } = imageShape.props;
+        const maxEdge = Math.max(w, h);
+
+        // Skip if already within size limit or is a placeholder (generating)
+        if (maxEdge <= DEFAULT_MAX_IMAGE_SIZE) return;
+        const meta = shape.meta as ImageMeta | undefined;
+        if (meta?.source === "generating") return;
+
+        // Calculate scale to fit within max size
+        const scale = DEFAULT_MAX_IMAGE_SIZE / maxEdge;
+        const newWidth = Math.round(w * scale);
+        const newHeight = Math.round(h * scale);
+
+        // Update shape with scaled dimensions
+        editor.updateShape({
+          id: shape.id,
+          type: "image",
+          props: {
+            w: newWidth,
+            h: newHeight,
+          },
+        });
+      });
+
+      return () => {
+        unsubscribeChanges();
+        unsubscribeResize();
+      };
+    },
+    [scheduleAutoSave],
+  );
+
+  // Cleanup timers on unmount
+  useEffect(() => {
     return () => {
-      unsubscribe()
-    }
-  }, [])
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+      if (savedStatusTimerRef.current) {
+        clearTimeout(savedStatusTimerRef.current);
+      }
+    };
+  }, []);
 
-  // Save handler
-  const handleSave = useCallback(async () => {
-    if (!editorRef.current) return
+  // Subscribe to external save requests (from upload complete, AI generation, etc.)
+  useEffect(() => {
+    return onCanvasSaveRequest(() => {
+      // Clear any pending auto-save to avoid duplicate saves
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      performSave(false);
+    });
+  }, [performSave]);
 
-    try {
-      const { document, session } = getSnapshot(editorRef.current.store)
-      await onSave({ document, session })
-      hasUnsavedChangesRef.current = false
-      toast.success('保存成功')
-    } catch {
-      // Error is handled by the mutation
-    }
-  }, [onSave])
-
-  // Auto-save warning on beforeunload (also warn if uploads in progress)
+  // Warn if uploads in progress before unload
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      // Check for unsaved changes or uploads in progress
-      const uploadingCount = selectUploadingCount(useAIStore.getState())
-      if (hasUnsavedChangesRef.current || uploadingCount > 0) {
-        e.preventDefault()
-        e.returnValue = ''
+      // Check for uploads in progress - warn user
+      const uploadingCount = selectUploadingCount(useAIStore.getState());
+      if (uploadingCount > 0) {
+        e.preventDefault();
+        e.returnValue = "";
       }
-    }
+      // Note: auto-save handles saving changes, no need for sendBeacon
+    };
 
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [])
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   // Update props store for InFrontOfTheCanvas
   canvasPropsStore = {
     projectName,
     onSave: handleSave,
     isSaving,
-  }
+    saveStatus,
+  };
 
   return (
-    <div className='relative h-full w-full'>
+    <div className="relative h-full w-full">
       <Tldraw
         assets={assetStore}
         components={{
@@ -253,5 +427,5 @@ export function TldrawCanvas({ projectId, projectName, canvasData, onSave, isSav
         <CanvasInner canvasData={canvasData} onSave={onSave} />
       </Tldraw>
     </div>
-  )
+  );
 }

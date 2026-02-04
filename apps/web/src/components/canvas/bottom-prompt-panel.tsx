@@ -1,3 +1,4 @@
+import { requestCanvasSave } from "@/lib/canvas-events";
 import {
   createPlaceholderShape,
   findNonOverlappingPosition,
@@ -56,18 +57,14 @@ export function BottomPromptPanel() {
 
   // Auto-dismiss error after 5 seconds
   useEffect(() => {
-    if (error) {
-      const timer = setTimeout(() => {
-        clearError();
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
+    if (!error) return;
+    const timer = setTimeout(clearError, 5000);
+    return () => clearTimeout(timer);
   }, [error, clearError]);
 
   const generatingCount = generatingTasks.size;
   const canStartNewTask = generatingCount < MAX_CONCURRENT_TASKS;
 
-  // Track selected images (supports multiple selection)
   const updateSelection = useCallback(() => {
     const selectedShapes = editor.getSelectedShapes();
 
@@ -113,16 +110,11 @@ export function BottomPromptPanel() {
     const currentAspectRatio = aspectRatio;
     const currentNumberOfImages = numberOfImages;
 
-    // Calculate placeholder dimensions
     const { width: placeholderWidth, height: placeholderHeight } =
       getPlaceholderDimensions(currentAspectRatio);
-
-    // Calculate positions for all placeholders
     const anchorShapeIds = selectedImages.map((img) => img.id);
-
-    // Create placeholder shapes for each image to be generated
     const placeholders: Array<{ taskId: string; shapeId: string }> = [];
-    let lastPosition = findNonOverlappingPosition(
+    const lastPosition = findNonOverlappingPosition(
       editor,
       anchorShapeIds,
       placeholderWidth,
@@ -172,6 +164,9 @@ export function BottomPromptPanel() {
         await updatePlaceholderWithImage(editor, shapeId, imageUrl, imageId);
         completeGenerating(taskId, imageUrl, imageId);
       }
+
+      // Trigger save after all images are added to canvas
+      requestCanvasSave();
     } catch (err) {
       console.error("Failed to generate images:", err);
 
@@ -212,6 +207,9 @@ export function BottomPromptPanel() {
 
       // Update the original image shape with the new inpainted image
       await updatePlaceholderWithImage(editor, inpaintTarget.shapeId, imageUrl, imageId);
+
+      // Trigger save after inpaint completes
+      requestCanvasSave();
 
       // Exit inpaint mode
       exitInpaintMode();
@@ -257,8 +255,7 @@ export function BottomPromptPanel() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Position at bottom center
-  // Note: pointer-events-auto is needed because tldraw's InFrontOfTheCanvas has pointer-events: none
+  // Position at bottom center (pointer-events-auto needed for tldraw's InFrontOfTheCanvas)
   return (
     <div className="pointer-events-auto fixed bottom-6 left-1/2 z-[200] -translate-x-1/2 transform">
       {/* Error Toast */}

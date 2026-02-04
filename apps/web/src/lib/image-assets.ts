@@ -105,10 +105,13 @@ export const isImageFile = (file: File): boolean => {
 const PLACEHOLDER_IMAGE =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
+// Default max dimension for images on canvas (keeps images at reasonable size)
+export const DEFAULT_MAX_IMAGE_SIZE = 320;
+
 // Calculate placeholder dimensions based on aspect ratio
 export const getPlaceholderDimensions = (
   aspectRatio: string,
-  baseSize = 500,
+  baseSize = DEFAULT_MAX_IMAGE_SIZE,
 ): { width: number; height: number } => {
   const [w, h] = aspectRatio.split(":").map(Number);
   if (!w || !h) return { width: baseSize, height: baseSize };
@@ -285,16 +288,15 @@ export const addImageFromUrl = async (
       },
     ]);
 
-    // Scale to reasonable size
-    const maxWidth = 500;
-    const maxHeight = 400;
+    // Scale to reasonable size (max edge = 320px)
     let width = dimensions.width;
     let height = dimensions.height;
+    const maxEdge = Math.max(width, height);
 
-    if (width > maxWidth || height > maxHeight) {
-      const scale = Math.min(maxWidth / width, maxHeight / height);
-      width *= scale;
-      height *= scale;
+    if (maxEdge > DEFAULT_MAX_IMAGE_SIZE) {
+      const scale = DEFAULT_MAX_IMAGE_SIZE / maxEdge;
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
     }
 
     // Get viewport bounds to calculate center
