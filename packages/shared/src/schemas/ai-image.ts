@@ -33,6 +33,16 @@ export const aspectRatioSchema = z.enum([
 export type AspectRatio = z.infer<typeof aspectRatioSchema>;
 
 /**
+ * Supported image sizes (resolutions)
+ * - 1K: 1024px - Social media, web display
+ * - 2K: 2048px - High quality content
+ * - 4K: 4096px - Professional design, printing (higher cost)
+ */
+export const imageSizeSchema = z.enum(["1K", "2K", "4K"]);
+
+export type ImageSize = z.infer<typeof imageSizeSchema>;
+
+/**
  * Supported AI models for image generation
  * - gemini-2.5-flash-image: Fast image generation (nanobanana)
  * - gemini-3-pro-image-preview: High quality image generation (nanobanana pro)
@@ -52,6 +62,7 @@ export const generateImageSchema = z.object({
   prompt: z.string().min(1, "Prompt is required").max(2000),
   negativePrompt: z.string().max(2000).optional(),
   aspectRatio: aspectRatioSchema.default("1:1"),
+  imageSize: imageSizeSchema.default("1K"),
   model: aiModelSchema.default("gemini-2.5-flash-image"),
   // Number of images to generate (1-4, default 1)
   numberOfImages: z.coerce.number().int().min(1).max(4).default(1),
@@ -119,6 +130,7 @@ export interface AIImageResponse {
   negativePrompt?: string;
   model?: string;
   aspectRatio?: string;
+  imageSize?: string;
   originalFileName?: string;
   r2Url: string;
   width: number;

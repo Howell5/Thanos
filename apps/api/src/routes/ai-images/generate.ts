@@ -39,7 +39,7 @@ const generateRoute = new Hono().post(
     }
 
     const data = c.req.valid("json");
-    const { projectId, prompt, negativePrompt, aspectRatio, model, numberOfImages, referenceImages } = data;
+    const { projectId, prompt, negativePrompt, aspectRatio, imageSize, model, numberOfImages, referenceImages } = data;
 
     const hasReferenceImages = referenceImages && referenceImages.length > 0;
     const operation = hasReferenceImages ? "image-to-image" : "text-to-image";
@@ -55,7 +55,7 @@ const generateRoute = new Hono().post(
     if (projectError) return projectError;
 
     // Check credits
-    const creditsRequired = geminiService.estimateCredits({ prompt, model, numberOfImages: imageCount });
+    const creditsRequired = geminiService.estimateCredits({ prompt, model, imageSize, numberOfImages: imageCount });
     const { error: creditsError, userRecord } = await checkUserCredits(c, session.user.id, creditsRequired);
     if (creditsError || !userRecord) return creditsError;
 
@@ -69,6 +69,7 @@ const generateRoute = new Hono().post(
         negativePrompt,
         model,
         aspectRatio,
+        imageSize,
         numberOfImages: imageCount,
         referenceImages,
       });
@@ -113,8 +114,13 @@ const generateRoute = new Hono().post(
       }
     }
 
-    // Calculate credits and save to database
-    const actualCreditsUsed = (usedModel.includes("flash") ? 50 : 100) * uploadResults.length;
+    // Calculate credits per image (4K costs ~80% more, Pro model only)
+    const isProModel = usedModel.includes("pro");
+    let creditsPerImage = isProModel ? 100 : 50;
+    if (isProModel && imageSize === "4K") {
+      creditsPerImage = Math.round(creditsPerImage * 1.8);
+    }
+    const actualCreditsUsed = creditsPerImage * uploadResults.length;
 
     const imageRecords = await db.transaction(async (tx) => {
       await tx
@@ -133,13 +139,14 @@ const generateRoute = new Hono().post(
             negativePrompt,
             model: usedModel,
             aspectRatio: aspectRatio || "1:1",
+            imageSize: imageSize || "1K",
             r2Key: key,
             r2Url: upload.url,
             width: image.width,
             height: image.height,
             fileSize: upload.size,
             mimeType: image.mimeType,
-            creditsUsed: usedModel.includes("flash") ? 50 : 100,
+            creditsUsed: creditsPerImage,
             status: "completed",
           })
           .returning();

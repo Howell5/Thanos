@@ -1,5 +1,5 @@
 import { ApiError, api } from "@/lib/api";
-import type { AIModel, AspectRatio } from "@repo/shared";
+import type { AIModel, AspectRatio, ImageSize } from "@repo/shared";
 import { create } from "zustand";
 import { type UploadSlice, type UploadTask, createUploadSlice } from "./upload-slice";
 
@@ -57,6 +57,15 @@ export const ASPECT_RATIOS: readonly { value: AspectRatio; label: string; descri
 
 export const DEFAULT_ASPECT_RATIO: AspectRatio = "1:1";
 
+// Image size (resolution) options
+export const IMAGE_SIZES: readonly { value: ImageSize; label: string; description: string }[] = [
+  { value: "1K", label: "1K", description: "1024px 标准" },
+  { value: "2K", label: "2K", description: "2048px 高清" },
+  { value: "4K", label: "4K", description: "4096px 超清" },
+];
+
+export const DEFAULT_IMAGE_SIZE: ImageSize = "1K";
+
 // Number of images options
 export const NUMBER_OF_IMAGES_OPTIONS = [1, 2, 3, 4] as const;
 export const DEFAULT_NUMBER_OF_IMAGES = 1;
@@ -102,6 +111,7 @@ interface AIStoreCore {
   currentPrompt: string;
   currentModel: ImageModel;
   aspectRatio: AspectRatio;
+  imageSize: ImageSize;
   numberOfImages: number;
   projectId: string | null;
   editMode: EditMode;
@@ -118,6 +128,7 @@ interface AIStoreCore {
   setCurrentPrompt: (prompt: string) => void;
   setCurrentModel: (model: ImageModel) => void;
   setAspectRatio: (ratio: AspectRatio) => void;
+  setImageSize: (size: ImageSize) => void;
   setNumberOfImages: (num: number) => void;
   startGenerating: (taskId: string, shapeId: string, prompt: string) => void;
   completeGenerating: (taskId: string, imageUrl: string, imageId: string) => void;
@@ -145,6 +156,7 @@ export const useAIStore = create<AIStore>()((set, get, store) => ({
   currentPrompt: "",
   currentModel: DEFAULT_MODEL,
   aspectRatio: DEFAULT_ASPECT_RATIO,
+  imageSize: DEFAULT_IMAGE_SIZE,
   numberOfImages: DEFAULT_NUMBER_OF_IMAGES,
   projectId: null,
   editMode: "normal",
@@ -171,10 +183,12 @@ export const useAIStore = create<AIStore>()((set, get, store) => ({
 
   setAspectRatio: (ratio: AspectRatio) => set({ aspectRatio: ratio }),
 
+  setImageSize: (size: ImageSize) => set({ imageSize: size }),
+
   setNumberOfImages: (num: number) => set({ numberOfImages: num }),
 
   startGenerating: (taskId: string, shapeId: string, prompt: string) => {
-    const { currentModel, aspectRatio } = get();
+    const { currentModel, aspectRatio, imageSize } = get();
     const task: GeneratingTask = {
       id: taskId,
       shapeId,
@@ -182,7 +196,7 @@ export const useAIStore = create<AIStore>()((set, get, store) => ({
       modelId: currentModel.id,
       modelName: currentModel.name,
       aspectRatio,
-      imageSize: aspectRatio,
+      imageSize,
       startedAt: Date.now(),
     };
 
@@ -224,7 +238,7 @@ export const useAIStore = create<AIStore>()((set, get, store) => ({
   },
 
   generateImage: async (prompt: string, referenceImages?: string[]) => {
-    const { currentModel, aspectRatio, canStartNewTask, projectId } = get();
+    const { currentModel, aspectRatio, imageSize, canStartNewTask, projectId } = get();
 
     if (!projectId) throw new Error("未设置项目 ID");
     if (!canStartNewTask) throw new Error(`最多同时生成 ${MAX_CONCURRENT_TASKS} 张图片`);
@@ -233,7 +247,7 @@ export const useAIStore = create<AIStore>()((set, get, store) => ({
 
     try {
       const response = await api.api["ai-images"].generate.$post({
-        json: { projectId, prompt, model: currentModel.id, aspectRatio, referenceImages },
+        json: { projectId, prompt, model: currentModel.id, aspectRatio, imageSize, referenceImages },
       });
 
       const json = await response.json();
@@ -255,7 +269,7 @@ export const useAIStore = create<AIStore>()((set, get, store) => ({
   },
 
   generateImages: async (prompt: string, referenceImages?: string[]) => {
-    const { currentModel, aspectRatio, numberOfImages, canStartNewTask, projectId } = get();
+    const { currentModel, aspectRatio, imageSize, numberOfImages, canStartNewTask, projectId } = get();
 
     if (!projectId) throw new Error("未设置项目 ID");
     if (!canStartNewTask) throw new Error(`最多同时生成 ${MAX_CONCURRENT_TASKS} 张图片`);
@@ -267,6 +281,7 @@ export const useAIStore = create<AIStore>()((set, get, store) => ({
           prompt,
           model: currentModel.id,
           aspectRatio,
+          imageSize,
           numberOfImages,
           referenceImages,
         },

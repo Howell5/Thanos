@@ -8,11 +8,12 @@ import {
 import {
   ASPECT_RATIOS,
   IMAGE_MODELS,
+  IMAGE_SIZES,
   MAX_CONCURRENT_TASKS,
   NUMBER_OF_IMAGES_OPTIONS,
   useAIStore,
 } from "@/stores/use-ai-store";
-import type { AspectRatio } from "@repo/shared";
+import type { AspectRatio, ImageSize } from "@repo/shared";
 import { AlertCircle, ArrowRight, Check, ChevronDown, Loader2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type TLImageShape, useEditor } from "tldraw";
@@ -37,6 +38,8 @@ export function BottomPromptPanel() {
     setCurrentModel,
     aspectRatio,
     setAspectRatio,
+    imageSize,
+    setImageSize,
     numberOfImages,
     setNumberOfImages,
     editMode,
@@ -406,6 +409,23 @@ export function BottomPromptPanel() {
                 </div>
               )}
             />
+
+            {/* Image Size (Resolution) Selector - Only for Pro model */}
+            {currentModel.id === "gemini-3-pro-image-preview" && (
+              <Dropdown<ImageSize>
+                value={imageSize}
+                options={IMAGE_SIZES}
+                onChange={setImageSize}
+                renderLabel={(option) => (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-800">{option.label}</span>
+                    {option.description && (
+                      <span className="text-xs text-gray-400">{option.description}</span>
+                    )}
+                  </div>
+                )}
+              />
+            )}
 
             {/* Number of Images Selector */}
             <div className="flex items-center rounded-lg bg-gray-100 p-0.5">

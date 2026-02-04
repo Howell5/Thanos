@@ -152,6 +152,8 @@ export const aiImages = pgTable("ai_images", {
   negativePrompt: text("negative_prompt"),
   model: text("model"),
   aspectRatio: text("aspect_ratio"),
+  // Image size/resolution: 1K (1024px), 2K (2048px), 4K (4096px)
+  imageSize: text("image_size"),
   // Upload info (null for AI-generated images)
   originalFileName: text("original_file_name"),
   // Storage info

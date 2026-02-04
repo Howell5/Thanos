@@ -11,6 +11,8 @@ export interface GenerateImageParams {
   negativePrompt?: string;
   model?: string;
   aspectRatio?: string;
+  // Image size/resolution: 1K (1024px), 2K (2048px), 4K (4096px)
+  imageSize?: "1K" | "2K" | "4K";
   // Number of images to generate (1-4)
   numberOfImages?: number;
   // Reference images for image-to-image generation (base64 strings)
@@ -31,20 +33,37 @@ export interface GenerateMultipleImagesResult {
   totalDurationMs: number;
 }
 
-// Aspect ratio to dimensions mapping
-// Based on ~1024px base size for optimal quality
-const ASPECT_RATIO_DIMENSIONS: Record<string, { width: number; height: number }> = {
-  "1:1": { width: 1024, height: 1024 },
-  "3:2": { width: 1024, height: 683 },
-  "2:3": { width: 683, height: 1024 },
-  "3:4": { width: 768, height: 1024 },
-  "4:3": { width: 1024, height: 768 },
-  "4:5": { width: 819, height: 1024 },
-  "5:4": { width: 1024, height: 819 },
-  "9:16": { width: 576, height: 1024 },
-  "16:9": { width: 1024, height: 576 },
-  "21:9": { width: 1024, height: 439 },
+// Image size to base pixel mapping
+const IMAGE_SIZE_PIXELS: Record<string, number> = {
+  "1K": 1024,
+  "2K": 2048,
+  "4K": 4096,
 };
+
+// Calculate dimensions based on aspect ratio and image size
+function calculateDimensions(
+  aspectRatio: string,
+  imageSize: string,
+): { width: number; height: number } {
+  const baseSize = IMAGE_SIZE_PIXELS[imageSize] || 1024;
+
+  // Parse aspect ratio (e.g., "16:9" -> { w: 16, h: 9 })
+  const [wRatio, hRatio] = aspectRatio.split(":").map(Number);
+  if (!wRatio || !hRatio) {
+    return { width: baseSize, height: baseSize };
+  }
+
+  // Calculate dimensions maintaining aspect ratio with base size as the larger dimension
+  if (wRatio >= hRatio) {
+    const width = baseSize;
+    const height = Math.round((baseSize * hRatio) / wRatio);
+    return { width, height };
+  } else {
+    const height = baseSize;
+    const width = Math.round((baseSize * wRatio) / hRatio);
+    return { width, height };
+  }
+}
 
 // Default model for image generation
 const DEFAULT_MODEL = "gemini-2.5-flash-image";
@@ -92,7 +111,10 @@ async function generateSingleImage(
   const startTime = Date.now();
   const model = params.model || DEFAULT_MODEL;
   const aspectRatio = params.aspectRatio || "1:1";
-  const dimensions = ASPECT_RATIO_DIMENSIONS[aspectRatio] || ASPECT_RATIO_DIMENSIONS["1:1"];
+  // imageSize only supported by Gemini 3 Pro, Flash always outputs 1K
+  const isProModel = model.includes("pro");
+  const imageSize = isProModel ? (params.imageSize || "1K") : "1K";
+  const dimensions = calculateDimensions(aspectRatio, imageSize);
 
   const ai = getGeminiClient();
 
@@ -127,24 +149,25 @@ async function generateSingleImage(
     contents = promptText;
   }
 
+  // Build image config - imageSize only for Pro model
+  const imageConfig: {
+    aspectRatio: "1:1" | "3:2" | "2:3" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9";
+    imageSize?: "1K" | "2K" | "4K";
+  } = {
+    aspectRatio: aspectRatio as "1:1" | "3:2" | "2:3" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9",
+  };
+
+  // Only add imageSize for Pro model
+  if (isProModel) {
+    imageConfig.imageSize = imageSize as "1K" | "2K" | "4K";
+  }
+
   const response = await ai.models.generateContent({
     model,
     contents,
     config: {
       responseModalities: ["TEXT", "IMAGE"],
-      imageConfig: {
-        aspectRatio: aspectRatio as
-          | "1:1"
-          | "3:2"
-          | "2:3"
-          | "3:4"
-          | "4:3"
-          | "4:5"
-          | "5:4"
-          | "9:16"
-          | "16:9"
-          | "21:9",
-      },
+      imageConfig,
     },
   });
 
@@ -197,6 +220,7 @@ export async function generateAIImages(
   console.log("[Gemini AI] Starting image generation", {
     model: params.model || DEFAULT_MODEL,
     aspectRatio: params.aspectRatio || "1:1",
+    imageSize: params.imageSize || "1K",
     numberOfImages,
     promptLength: params.prompt.length,
     hasReferenceImages: !!(params.referenceImages && params.referenceImages.length > 0),
@@ -332,17 +356,24 @@ export async function inpaintAIImage(params: InpaintImageParams): Promise<Genera
 /**
  * Estimate credits for an image generation
  * Credits are charged per image generated
+ * 4K images cost ~80% more than 1K/2K (Pro model only)
  */
 export function estimateCredits(params: GenerateImageParams): number {
   const model = params.model || DEFAULT_MODEL;
+  const imageSize = params.imageSize || "1K";
   const numberOfImages = params.numberOfImages || 1;
+  const isProModel = model.includes("pro");
 
-  // Base cost per image
+  // Base cost per image (1K/2K)
   let costPerImage: number;
-  if (model.includes("flash")) {
-    costPerImage = 50; // gemini-2.5-flash-image is cheaper
+  if (isProModel) {
+    costPerImage = 100; // gemini-3-pro-image-preview
+    // 4K costs ~80% more (Pro model only)
+    if (imageSize === "4K") {
+      costPerImage = Math.round(costPerImage * 1.8);
+    }
   } else {
-    costPerImage = 100; // gemini-3-pro-image-preview is more expensive
+    costPerImage = 50; // gemini-2.5-flash-image (no imageSize support)
   }
 
   return costPerImage * numberOfImages;
