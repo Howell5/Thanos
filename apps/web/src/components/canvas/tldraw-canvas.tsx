@@ -9,6 +9,7 @@ import {
 } from "tldraw";
 import "tldraw/tldraw.css";
 import { Button } from "@/components/ui/button";
+import { useAgentRenderer } from "@/hooks/use-agent-renderer";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { onCanvasSaveRequest, requestCanvasSave } from "@/lib/canvas-events";
 import {
@@ -22,6 +23,8 @@ import { ArrowLeft, Check, Loader2, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { AgentEventShapeUtil } from "./agent-event-shape";
+import { AgentPanel } from "./agent-panel";
 import { BottomPromptPanel } from "./bottom-prompt-panel";
 
 // Auto-save debounce delay in milliseconds
@@ -58,6 +61,9 @@ function CanvasEventHandler() {
   // Add keyboard shortcuts
   useKeyboardShortcuts(editor);
 
+  // Connect agent renderer to canvas
+  useAgentRenderer(editor);
+
   // Listen for shape deletions to cancel upload tasks
   useEffect(() => {
     const unsubscribe = editor.store.listen(
@@ -92,6 +98,7 @@ function InFrontOfTheCanvas() {
     <>
       <FloatingToolbar />
       <BottomPromptPanel />
+      <AgentPanel />
       <GeneratingOverlay />
       <InpaintingOverlay />
       <UploadingOverlay />
@@ -417,6 +424,7 @@ export function TldrawCanvas({
   return (
     <div className="relative h-full w-full">
       <Tldraw
+        shapeUtils={[AgentEventShapeUtil]}
         assets={assetStore}
         components={{
           InFrontOfTheCanvas: InFrontOfTheCanvas,

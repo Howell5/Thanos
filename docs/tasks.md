@@ -26,38 +26,40 @@
 
 ---
 
-## Day 2: 前端 SSE 客户端 + Store
+## Day 2: 前端 SSE 客户端 + Store ✅
 
 **目标**: 浏览器控制台能打印 Agent 事件
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
-| 创建 SSE 客户端封装 | ⬜ 待开始 | `apps/web/src/lib/agent-sse.ts` |
-| 创建 Agent Zustand Store | ⬜ 待开始 | `apps/web/src/stores/use-agent-store.ts` |
-| 定义 AgentEvent 类型 | ⬜ 待开始 | 在 `packages/shared` |
-| 浏览器控制台测试 | ⬜ 待开始 | 验证事件接收 |
+| 创建 SSE 客户端封装 | ✅ 完成 | `apps/web/src/lib/agent-sse.ts` |
+| 创建 Agent Zustand Store | ✅ 完成 | `apps/web/src/stores/use-agent-store.ts` |
+| 定义 AgentEvent 类型 | ✅ 完成 | 在 `agent-sse.ts` 中定义 |
+| 浏览器控制台测试 | ✅ 完成 | 14 个事件成功接收 |
 
 **交付物**:
-- `apps/web/src/lib/agent-sse.ts` (~50 行)
-- `apps/web/src/stores/use-agent-store.ts` (~80 行)
+- `apps/web/src/lib/agent-sse.ts` (~90 行)
+- `apps/web/src/stores/use-agent-store.ts` (~176 行)
 
 ---
 
-## Day 3: Canvas 渲染
+## Day 3: Canvas 渲染 ✅
 
 **目标**: 事件变成 Shape 显示在画布上
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
-| 创建 AgentRenderer 类 | ⬜ 待开始 | 事件 → Shape 映射 |
-| 实现垂直流式布局 | ⬜ 待开始 | 简单的 y 递增布局 |
-| thinking 事件 → text Shape | ⬜ 待开始 | 灰色文字 |
-| tool_start → geo Shape | ⬜ 待开始 | 蓝色矩形 + 工具名 |
-| tool_end → 更新 Shape | ⬜ 待开始 | 绿色边框 + 输出 |
-| 集成到 Canvas 组件 | ⬜ 待开始 | 监听 store 变化 |
+| 创建 AgentRenderer 类 | ✅ 完成 | 事件 → Frame Shape 映射 |
+| 实现垂直流式布局 | ✅ 完成 | 基于 viewport 位置的 y 递增布局 |
+| thinking 事件 → frame Shape | ✅ 完成 | 💭 前缀 + 流式更新 |
+| tool_start → frame Shape | ✅ 完成 | 🔧 前缀 + 工具名和参数 |
+| tool_end → 更新 Shape | ✅ 完成 | ✅ 前缀表示完成 |
+| 集成到 Canvas 组件 | ✅ 完成 | useAgentRenderer hook |
 
 **交付物**:
-- `apps/web/src/components/canvas/agent-renderer.ts` (~100 行)
+- `apps/web/src/components/canvas/agent-renderer.ts` (~235 行)
+- `apps/web/src/components/canvas/agent-panel.tsx` (~155 行)
+- `apps/web/src/hooks/use-agent-renderer.ts` (~50 行)
 
 ---
 
@@ -105,12 +107,14 @@ apps/api/src/
 
 apps/web/src/
 ├── lib/
-│   └── agent-sse.ts          ⬜ Day 2
+│   └── agent-sse.ts          ✅ Day 2
 ├── stores/
-│   └── use-agent-store.ts    ⬜ Day 2
+│   └── use-agent-store.ts    ✅ Day 2
+├── hooks/
+│   └── use-agent-renderer.ts ✅ Day 3
 └── components/canvas/
-    ├── agent-renderer.ts     ⬜ Day 3
-    └── agent-panel.tsx       ⬜ Day 4
+    ├── agent-renderer.ts     ✅ Day 3
+    └── agent-panel.tsx       ✅ Day 3
 
 docs/
 ├── agent-runner-mvp.md       ✅ Day 1
@@ -139,7 +143,7 @@ docs/
 | Day | 日期 | 状态 | 备注 |
 |-----|------|------|------|
 | Day 1 | 2025-02-05 | ✅ 完成 | 后端 SSE + SDK |
-| Day 2 | - | ⬜ 待开始 | 前端 SSE + Store |
-| Day 3 | - | ⬜ 待开始 | Canvas 渲染 |
+| Day 2 | 2025-02-05 | ✅ 完成 | 前端 SSE + Store |
+| Day 3 | 2025-02-05 | ✅ 完成 | Canvas 渲染 + AgentPanel |
 | Day 4 | - | ⬜ 待开始 | UI 完善 |
 | Day 5 | - | ⬜ 待开始 | 测试打磨 |

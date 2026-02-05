@@ -63,8 +63,8 @@ const getAllowedOrigins = () => {
     }
     return [frontendUrl];
   }
-  // Development: allow local Vite dev server
-  return ["http://localhost:5173", "http://localhost:5174"];
+  // Development: allow local Vite dev server (multiple ports for concurrent instances)
+  return ["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176", "http://localhost:5177", "http://localhost:5178"];
 };
 
 /**
