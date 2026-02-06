@@ -249,7 +249,7 @@ R2_SECRET_ACCESS_KEY=...
 ## Project Structure
 
 ```
-berryon/
+thanos/
 ├── apps/
 │   ├── api/                    # Backend application
 │   │   ├── src/

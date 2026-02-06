@@ -8,7 +8,7 @@
  */
 
 import { zValidator } from "@hono/zod-validator";
-import { confirmUploadSchema, presignUploadSchema } from "@repo/shared";
+import { confirmUploadSchema, isVideoType, presignUploadSchema } from "@repo/shared";
 import { Hono } from "hono";
 import { db } from "../../db";
 import { aiImages } from "../../db/schema";
@@ -39,8 +39,14 @@ const presignRoute = new Hono()
     const { error: projectError } = await verifyProjectAccess(c, projectId, session.user.id);
     if (projectError) return projectError;
 
-    // Generate R2 key
-    const key = r2Service.generateImageKey(session.user.id, projectId);
+    // Generate R2 key based on content type
+    let key: string;
+    if (isVideoType(contentType)) {
+      const ext = contentType === "video/webm" ? "webm" : "mp4";
+      key = r2Service.generateMediaKey(session.user.id, projectId, ext);
+    } else {
+      key = r2Service.generateImageKey(session.user.id, projectId);
+    }
 
     try {
       const result = await r2Service.generatePresignedUploadUrl(key, contentType);
@@ -75,12 +81,15 @@ const presignRoute = new Hono()
     if (projectError) return projectError;
 
     // Verify the key belongs to this project (security check)
-    if (!key.startsWith(`projects/${projectId}/images/`)) {
+    const validPrefix =
+      key.startsWith(`projects/${projectId}/images/`) ||
+      key.startsWith(`projects/${projectId}/media/`);
+    if (!validPrefix) {
       return errors.forbidden(c, "Invalid upload key for this project");
     }
 
     // Get CDN URL from key
-    const cdnDomain = process.env.R2_CDN_DOMAIN || "img.berryon.art";
+    const cdnDomain = process.env.R2_CDN_DOMAIN || "img.thanos.art";
     const r2Url = `https://${cdnDomain}/${key}`;
 
     // Save to database
@@ -93,8 +102,8 @@ const presignRoute = new Hono()
         originalFileName: filename,
         r2Key: key,
         r2Url,
-        width,
-        height,
+        width: width ?? 0,
+        height: height ?? 0,
         fileSize,
         mimeType: contentType,
         creditsUsed: 0,

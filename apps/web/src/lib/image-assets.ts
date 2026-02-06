@@ -58,7 +58,7 @@ export const createImageAssetStore = (): TLAssetStore => {
   };
 };
 
-// Metadata for AI-generated images
+// Metadata for AI-generated images and videos
 export interface ImageMeta {
   source: "ai-generated" | "uploaded" | "generating" | "uploading";
   // Task ID for generating or uploading images
@@ -70,7 +70,7 @@ export interface ImageMeta {
   aspectRatio?: string;
   imageSize?: string;
   generatedAt?: number;
-  // Database image ID (for berryon backend)
+  // Database image ID (for thanos backend)
   imageId?: string;
   // Image dimensions (for all images)
   originalWidth?: number;
@@ -79,6 +79,9 @@ export interface ImageMeta {
   uploadTaskId?: string;
   localPreviewUrl?: string; // Temporary base64 preview during upload
   originalFileName?: string;
+  // Video info (for video assets)
+  videoId?: string; // Database video ID (links to videos table for clip indexing)
+  duration?: number; // Video duration in seconds
   // Index signature for JsonObject compatibility
   [key: string]: string | number | boolean | undefined;
 }
@@ -99,6 +102,16 @@ export const getImageDimensions = (url: string): Promise<{ width: number; height
 // Check if file is an image
 export const isImageFile = (file: File): boolean => {
   return file.type.startsWith("image/");
+};
+
+// Check if file is a video
+export const isVideoFile = (file: File): boolean => {
+  return file.type === "video/mp4" || file.type === "video/webm";
+};
+
+// Check if file is a supported media file (image or video)
+export const isMediaFile = (file: File): boolean => {
+  return isImageFile(file) || isVideoFile(file);
 };
 
 // A 1x1 transparent PNG as placeholder

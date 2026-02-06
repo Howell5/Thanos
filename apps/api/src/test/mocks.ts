@@ -149,7 +149,7 @@ export class MockR2Service implements IR2Service {
 
     return {
       key: options.key,
-      url: `https://img.berryon.art/${options.key}`,
+      url: `https://img.thanos.art/${options.key}`,
       size: options.data.length,
     };
   }
@@ -168,6 +168,12 @@ export class MockR2Service implements IR2Service {
     return `projects/${projectId}/images/${timestamp}-${random}.png`;
   }
 
+  generateMediaKey(userId: string, projectId: string, extension: string): string {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8);
+    return `projects/${projectId}/media/${timestamp}-${random}.${extension}`;
+  }
+
   async generatePresignedUploadUrl(
     key: string,
     contentType: string,
@@ -179,7 +185,7 @@ export class MockR2Service implements IR2Service {
 
     return {
       uploadUrl: `https://mock-presign-url.r2.cloudflarestorage.com/${key}?signature=mock`,
-      cdnUrl: `https://img.berryon.art/${key}`,
+      cdnUrl: `https://img.thanos.art/${key}`,
       key,
       expiresIn,
     };

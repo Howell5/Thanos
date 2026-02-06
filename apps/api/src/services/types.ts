@@ -30,6 +30,7 @@ export interface IR2Service {
   upload(options: UploadOptions): Promise<UploadResult>;
   delete(key: string): Promise<void>;
   generateImageKey(userId: string, projectId: string): string;
+  generateMediaKey(userId: string, projectId: string, extension: string): string;
   generatePresignedUploadUrl(
     key: string,
     contentType: string,

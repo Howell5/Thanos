@@ -174,6 +174,60 @@ export const aiImages = pgTable("ai_images", {
 });
 
 /**
+ * Videos table
+ * Stores video assets uploaded to projects with analysis status
+ */
+export const videos = pgTable("videos", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  // Storage info
+  r2Key: text("r2_key").notNull().unique(),
+  r2Url: text("r2_url").notNull(),
+  originalFileName: text("original_file_name"),
+  fileSize: integer("file_size").notNull(),
+  mimeType: text("mime_type").notNull().default("video/mp4"),
+  // Video metadata
+  width: integer("width"),
+  height: integer("height"),
+  duration: integer("duration"), // in seconds
+  // Analysis status: 'pending' | 'analyzing' | 'done' | 'failed'
+  analysisStatus: text("analysis_status").notNull().default("pending"),
+  analysisRequest: text("analysis_request"), // prompt used for analysis
+  analysisError: text("analysis_error"),
+  analyzedAt: timestamp("analyzed_at", { mode: "date", withTimezone: true }),
+  // Timestamps
+  createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Video clips table
+ * Stores analyzed clip segments from videos
+ */
+export const videoClips = pgTable("video_clips", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  videoId: uuid("video_id")
+    .notNull()
+    .references(() => videos.id, { onDelete: "cascade" }),
+  // Time range
+  timeRange: text("time_range").notNull(), // "00:05-00:08"
+  startTime: integer("start_time").notNull(), // in seconds
+  endTime: integer("end_time").notNull(), // in seconds
+  // Clip classification
+  clipType: text("clip_type").notNull(), // "hook", "品牌露出", "产品展示", etc.
+  // Analysis content
+  description: text("description").notNull(),
+  reason: text("reason").notNull(),
+  // Timestamps
+  createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * AI Usage History table
  * Detailed tracking of all AI API calls (for analytics and debugging)
  */
@@ -211,6 +265,7 @@ export const userRelations = relations(user, ({ many }) => ({
   projects: many(projects),
   aiImages: many(aiImages),
   aiUsageHistory: many(aiUsageHistory),
+  videos: many(videos),
 }));
 
 export const postsRelations = relations(posts, ({ one }) => ({
@@ -247,6 +302,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
     references: [user.id],
   }),
   images: many(aiImages),
+  videos: many(videos),
 }));
 
 export const aiImagesRelations = relations(aiImages, ({ one }) => ({
@@ -272,5 +328,24 @@ export const aiUsageHistoryRelations = relations(aiUsageHistory, ({ one }) => ({
   image: one(aiImages, {
     fields: [aiUsageHistory.imageId],
     references: [aiImages.id],
+  }),
+}));
+
+export const videosRelations = relations(videos, ({ one, many }) => ({
+  project: one(projects, {
+    fields: [videos.projectId],
+    references: [projects.id],
+  }),
+  user: one(user, {
+    fields: [videos.userId],
+    references: [user.id],
+  }),
+  clips: many(videoClips),
+}));
+
+export const videoClipsRelations = relations(videoClips, ({ one }) => ({
+  video: one(videos, {
+    fields: [videoClips.videoId],
+    references: [videos.id],
   }),
 }));

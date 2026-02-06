@@ -159,7 +159,7 @@
 
   - [ ] 10.2 实现 localStorage 持久化
     - 保存/加载 prompt 历史到 localStorage
-    - key 格式: `berryon:prompt-history:{projectId}`
+    - key 格式: `thanos:prompt-history:{projectId}`
     - _Requirements: 6.5_
 
   - [ ] 10.3 创建 PromptHistoryPanel 组件

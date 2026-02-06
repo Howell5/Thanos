@@ -211,7 +211,7 @@ interface UpscaleImageRequest {
 
 ### Prompt History 存储
 
-使用 localStorage 存储，key 为 `berryon:prompt-history:{projectId}`：
+使用 localStorage 存储，key 为 `thanos:prompt-history:{projectId}`：
 
 ```typescript
 interface PromptHistoryData {

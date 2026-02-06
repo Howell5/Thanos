@@ -18,14 +18,15 @@ import {
   createImageAssetStoreWithUpload,
 } from "@/lib/image-assets";
 import { ROUTES } from "@/lib/routes";
+import { useAgentStore } from "@/stores/use-agent-store";
 import { selectUploadingCount, useAIStore } from "@/stores/use-ai-store";
 import { ArrowLeft, Check, Loader2, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { AgentEventShapeUtil } from "./agent-event-shape";
-import { AgentPanel } from "./agent-panel";
+import { AgentChatPanel, AgentPanelToggle } from "./agent-chat-panel";
 import { BottomPromptPanel } from "./bottom-prompt-panel";
+import { RichCardShapeUtil } from "./rich-card-shape";
 
 // Auto-save debounce delay in milliseconds
 const AUTO_SAVE_DELAY = 2000;
@@ -93,12 +94,25 @@ function CanvasEventHandler() {
 // Component rendered in front of the canvas (highest z-index)
 function InFrontOfTheCanvas() {
   const props = canvasPropsStore;
+  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  const agentStatus = useAgentStore((s) => s.status);
+
+  // Auto-open panel when agent starts running
+  useEffect(() => {
+    if (agentStatus === "running") {
+      setAgentPanelOpen(true);
+    }
+  }, [agentStatus]);
 
   return (
     <>
       <FloatingToolbar />
       <BottomPromptPanel />
-      <AgentPanel />
+      {agentPanelOpen ? (
+        <AgentChatPanel open={agentPanelOpen} onClose={() => setAgentPanelOpen(false)} />
+      ) : (
+        <AgentPanelToggle onClick={() => setAgentPanelOpen(true)} />
+      )}
       <GeneratingOverlay />
       <InpaintingOverlay />
       <UploadingOverlay />
@@ -242,7 +256,8 @@ export function TldrawCanvas({
   onSave,
   isSaving,
 }: TldrawCanvasProps) {
-  const { setProjectId, uploadImage } = useAIStore();
+  const { setProjectId: setAIProjectId, uploadImage } = useAIStore();
+  const setAgentProjectId = useAgentStore((s) => s.setProjectId);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
   // Create asset store with R2 upload support
@@ -262,10 +277,11 @@ export function TldrawCanvas({
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Set project ID for AI store
+  // Set project ID for both AI store and Agent store
   useEffect(() => {
-    setProjectId(projectId);
-  }, [projectId, setProjectId]);
+    setAIProjectId(projectId);
+    setAgentProjectId(projectId);
+  }, [projectId, setAIProjectId, setAgentProjectId]);
 
   // Internal save function (silent, for auto-save)
   const performSave = useCallback(
@@ -424,7 +440,7 @@ export function TldrawCanvas({
   return (
     <div className="relative h-full w-full">
       <Tldraw
-        shapeUtils={[AgentEventShapeUtil]}
+        shapeUtils={[RichCardShapeUtil]}
         assets={assetStore}
         components={{
           InFrontOfTheCanvas: InFrontOfTheCanvas,

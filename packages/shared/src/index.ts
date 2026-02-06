@@ -16,5 +16,8 @@ export * from "./schemas/project";
 // AI Image schemas
 export * from "./schemas/ai-image";
 
+// Video schemas
+export * from "./schemas/video";
+
 // Pricing config
 export * from "./config/pricing";

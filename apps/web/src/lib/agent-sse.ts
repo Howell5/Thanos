@@ -1,33 +1,43 @@
 import { env } from "../env";
 
 /**
- * Agent event types from the backend SSE stream
+ * Agent message types from the backend SSE stream.
+ *
+ * Message-based model (not raw events):
+ * - text_delta: streaming text fragment, append to current text block
+ * - text_done: current text block is finalized
+ * - tool_use: a tool was invoked (name + input)
+ * - tool_result: result for a previous tool_use (matched by toolId)
+ * - system: session init
+ * - result: agent finished with cost/token stats
+ * - error: something went wrong
  */
-export type AgentEvent =
+export type AgentMessage =
   | { type: "system"; sessionId: string }
-  | { type: "thinking"; content: string }
-  | { type: "tool_start"; tool: string; input: unknown }
-  | { type: "tool_end"; tool: string; output: string }
-  | { type: "message"; content: string }
-  | { type: "done"; cost: number; inputTokens: number; outputTokens: number }
+  | { type: "text_delta"; content: string }
+  | { type: "text_done" }
+  | { type: "tool_use"; toolId: string; tool: string; input: unknown }
+  | { type: "tool_result"; toolId: string; output: string }
+  | { type: "result"; cost: number; inputTokens: number; outputTokens: number }
   | { type: "error"; message: string };
 
 export interface AgentRunParams {
   prompt: string;
   workspacePath: string;
+  sessionId?: string;
+  projectId?: string; // For video tools access
 }
 
 /**
- * Subscribe to Agent SSE stream
- * Returns an abort function to cancel the stream
+ * Subscribe to Agent SSE stream.
+ * Returns an abort function to cancel the stream.
  */
 export function subscribeAgentSSE(
   params: AgentRunParams,
-  onEvent: (event: AgentEvent) => void,
+  onMessage: (msg: AgentMessage) => void,
 ): () => void {
   const controller = new AbortController();
 
-  // Use fetch for SSE since EventSource doesn't support POST
   fetch(`${env.VITE_API_URL}/api/agent/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -37,13 +47,13 @@ export function subscribeAgentSSE(
   })
     .then(async (response) => {
       if (!response.ok) {
-        onEvent({ type: "error", message: `HTTP ${response.status}: ${response.statusText}` });
+        onMessage({ type: "error", message: `HTTP ${response.status}: ${response.statusText}` });
         return;
       }
 
       const reader = response.body?.getReader();
       if (!reader) {
-        onEvent({ type: "error", message: "No response body" });
+        onMessage({ type: "error", message: "No response body" });
         return;
       }
 
@@ -65,23 +75,22 @@ export function subscribeAgentSSE(
 
           if (line.startsWith("data: ")) {
             try {
-              const event = JSON.parse(line.slice(6)) as AgentEvent;
-              onEvent(event);
+              const msg = JSON.parse(line.slice(6)) as AgentMessage;
+              onMessage(msg);
             } catch {
               // Incomplete JSON, save for next chunk
               buffer = lines.slice(i).join("\n");
               break;
             }
           } else if (line !== "" && !line.startsWith("event:")) {
-            // Keep non-empty, non-event lines in buffer
-            buffer += line + "\n";
+            buffer += `${line}\n`;
           }
         }
       }
     })
     .catch((err) => {
       if (err.name !== "AbortError") {
-        onEvent({ type: "error", message: err.message || "Connection failed" });
+        onMessage({ type: "error", message: err.message || "Connection failed" });
       }
     });
 

@@ -1,239 +1,146 @@
+import { findNonOverlappingPosition } from "@/lib/canvas-position";
 import type { Editor, TLShapeId } from "tldraw";
-import { createShapeId } from "tldraw";
-import type { AgentEvent } from "@/lib/agent-sse";
-import {
-  AGENT_EVENT_SHAPE_TYPE,
-  type AgentEventVariant,
-} from "./agent-event-shape";
+import { AssetRecordType, createShapeId } from "tldraw";
+import { RICH_CARD_SHAPE_TYPE } from "./rich-card-shape";
 
 /**
- * Layout configuration for agent event visualization
+ * Artifact extracted from tool output via heuristic detection
  */
+export type Artifact =
+  | { type: "image"; url: string; width?: number; height?: number }
+  | { type: "table"; title?: string; headers: string[]; rows: string[][] }
+  | { type: "text"; content: string; format?: "markdown" | "plain" }
+  | { type: "file"; name: string; url: string; mimeType?: string }
+  | { type: "unknown"; raw: string };
+
 const LAYOUT = {
-  gapY: 12,
-  shapeWidth: 360,
-  shapeHeight: 64,
-  doneHeight: 48,
+  cardWidth: 400,
+  cardHeight: 300,
 };
 
 /**
- * AgentRenderer - Maps agent SSE events to custom tldraw shapes
+ * AgentRenderer - Places artifact shapes on the tldraw canvas.
  *
- * Creates visually styled agent-event shapes on the canvas.
+ * Process display (thinking, tool calls) is handled by AgentChatPanel.
+ * This class only handles placing artifacts on canvas when requested.
  */
 export class AgentRenderer {
   private editor: Editor;
-  private startX: number = 100;
-  private currentY: number = 100;
-  private toolShapeMap: Map<string, TLShapeId> = new Map();
-  private sessionShapeIds: TLShapeId[] = [];
-  private thinkingShapeId: TLShapeId | null = null;
-  private thinkingContent: string = "";
+  private artifactShapeIds: Map<number, TLShapeId> = new Map();
 
   constructor(editor: Editor) {
     this.editor = editor;
-    this.initializePosition();
   }
 
-  private initializePosition(): void {
-    const viewportBounds = this.editor.getViewportPageBounds();
-    this.startX = viewportBounds.x + 50;
-    this.currentY = viewportBounds.y + 50;
+  /**
+   * Check if an artifact has already been placed on canvas
+   */
+  hasArtifact(index: number): boolean {
+    return this.artifactShapeIds.has(index);
   }
 
+  /**
+   * Reset tracked artifact shapes (does not delete them from canvas)
+   */
   reset(): void {
-    if (this.sessionShapeIds.length > 0) {
-      this.editor.deleteShapes(this.sessionShapeIds);
-    }
-    this.initializePosition();
-    this.toolShapeMap.clear();
-    this.sessionShapeIds = [];
-    this.thinkingShapeId = null;
-    this.thinkingContent = "";
+    this.artifactShapeIds.clear();
   }
 
-  renderEvent(event: AgentEvent): void {
-    switch (event.type) {
-      case "system":
-        this.renderSystemEvent(event);
-        break;
-      case "thinking":
-        this.renderThinkingEvent(event);
-        break;
-      case "tool_start":
-        this.renderToolStartEvent(event);
-        break;
-      case "tool_end":
-        this.renderToolEndEvent(event);
-        break;
-      case "message":
-        this.renderMessageEvent(event);
-        break;
-      case "done":
-        this.renderDoneEvent(event);
-        break;
-      case "error":
-        this.renderErrorEvent(event);
-        break;
+  /**
+   * Place a single artifact on the canvas.
+   * Returns the created shape ID.
+   */
+  renderArtifact(artifact: Artifact, index: number): TLShapeId | null {
+    if (this.artifactShapeIds.has(index)) return null;
+
+    if (artifact.type === "image") {
+      return this.renderImageArtifact(artifact, index);
     }
+    return this.renderCardArtifact(artifact, index);
   }
 
-  private createAgentShape(
-    variant: AgentEventVariant,
-    label: string,
-    detail: string = "",
-    height: number = LAYOUT.shapeHeight,
+  private renderImageArtifact(
+    artifact: Extract<Artifact, { type: "image" }>,
+    index: number,
   ): TLShapeId {
+    const w = artifact.width || 320;
+    const h = artifact.height || 320;
+    const existingIds = [...this.artifactShapeIds.values()];
+    const position = findNonOverlappingPosition(this.editor, existingIds, w, h);
+
     const shapeId = createShapeId();
+    const assetId = AssetRecordType.createId();
+
+    this.editor.createAssets([
+      {
+        id: assetId,
+        type: "image",
+        typeName: "asset",
+        props: {
+          name: `artifact-${index}.png`,
+          src: artifact.url,
+          w,
+          h,
+          mimeType: "image/png",
+          isAnimated: false,
+        },
+        meta: {},
+      },
+    ]);
+
     this.editor.createShape({
       id: shapeId,
-      type: AGENT_EVENT_SHAPE_TYPE,
-      x: this.startX,
-      y: this.currentY,
-      props: {
-        w: LAYOUT.shapeWidth,
-        h: height,
-        variant,
-        label: this.truncate(label, 120),
-        detail: this.truncate(detail, 200),
-      },
+      type: "image",
+      x: position.x,
+      y: position.y,
+      props: { assetId, w, h },
     });
-    this.sessionShapeIds.push(shapeId);
-    this.currentY += height + LAYOUT.gapY;
+
+    this.artifactShapeIds.set(index, shapeId);
     return shapeId;
   }
 
-  private renderSystemEvent(event: Extract<AgentEvent, { type: "system" }>): void {
-    this.createAgentShape(
-      "system",
-      "Session Started",
-      `ID: ${event.sessionId.slice(0, 12)}...`,
-      LAYOUT.doneHeight,
+  private renderCardArtifact(artifact: Artifact, index: number): TLShapeId {
+    const template = artifact.type === "unknown" ? "text" : artifact.type;
+    const existingIds = [...this.artifactShapeIds.values()];
+    const position = findNonOverlappingPosition(
+      this.editor,
+      existingIds,
+      LAYOUT.cardWidth,
+      LAYOUT.cardHeight,
     );
-  }
-
-  private renderThinkingEvent(event: Extract<AgentEvent, { type: "thinking" }>): void {
-    this.thinkingContent += event.content;
-
-    if (!this.thinkingShapeId) {
-      const shapeId = createShapeId();
-      this.editor.createShape({
-        id: shapeId,
-        type: AGENT_EVENT_SHAPE_TYPE,
-        x: this.startX,
-        y: this.currentY,
-        props: {
-          w: LAYOUT.shapeWidth,
-          h: LAYOUT.shapeHeight,
-          variant: "thinking",
-          label: "Thinking...",
-          detail: this.truncate(this.thinkingContent, 200),
-        },
-      });
-      this.sessionShapeIds.push(shapeId);
-      this.thinkingShapeId = shapeId;
-    } else {
-      this.editor.updateShape({
-        id: this.thinkingShapeId,
-        type: AGENT_EVENT_SHAPE_TYPE,
-        props: {
-          detail: this.truncate(this.thinkingContent, 200),
-        },
-      });
-    }
-  }
-
-  private finalizeThinking(): void {
-    if (this.thinkingShapeId) {
-      this.currentY += LAYOUT.shapeHeight + LAYOUT.gapY;
-      this.thinkingShapeId = null;
-      this.thinkingContent = "";
-    }
-  }
-
-  private renderToolStartEvent(event: Extract<AgentEvent, { type: "tool_start" }>): void {
-    this.finalizeThinking();
 
     const shapeId = createShapeId();
-    const inputStr = this.formatInput(event.input);
-
     this.editor.createShape({
       id: shapeId,
-      type: AGENT_EVENT_SHAPE_TYPE,
-      x: this.startX,
-      y: this.currentY,
+      type: RICH_CARD_SHAPE_TYPE,
+      x: position.x,
+      y: position.y,
       props: {
-        w: LAYOUT.shapeWidth,
-        h: LAYOUT.shapeHeight,
-        variant: "tool",
-        label: event.tool,
-        detail: this.truncate(inputStr, 200),
+        w: LAYOUT.cardWidth,
+        h: LAYOUT.cardHeight,
+        template,
+        cardData: JSON.stringify(artifact),
+        title: this.getArtifactTitle(artifact),
       },
     });
 
-    this.sessionShapeIds.push(shapeId);
-    this.toolShapeMap.set(event.tool, shapeId);
-    this.currentY += LAYOUT.shapeHeight + LAYOUT.gapY;
+    this.artifactShapeIds.set(index, shapeId);
+    return shapeId;
   }
 
-  private renderToolEndEvent(event: Extract<AgentEvent, { type: "tool_end" }>): void {
-    const existingShapeId = this.toolShapeMap.get(event.tool);
-
-    if (existingShapeId) {
-      const existingShape = this.editor.getShape(existingShapeId);
-      if (existingShape && existingShape.type === AGENT_EVENT_SHAPE_TYPE) {
-        const currentLabel = (existingShape.props as { label?: string }).label || event.tool;
-        this.editor.updateShape({
-          id: existingShapeId,
-          type: AGENT_EVENT_SHAPE_TYPE,
-          props: {
-            variant: "tool_done",
-            label: currentLabel,
-            detail: this.truncate(event.output, 200),
-          },
-        });
-      }
-      this.toolShapeMap.delete(event.tool);
-    } else {
-      this.createAgentShape(
-        "tool_done",
-        event.tool,
-        this.truncate(event.output, 200),
-      );
+  private getArtifactTitle(artifact: Artifact): string {
+    switch (artifact.type) {
+      case "text":
+        return "Text Output";
+      case "table":
+        return artifact.title || "Table";
+      case "file":
+        return artifact.name;
+      case "unknown":
+        return "Output";
+      default:
+        return "Artifact";
     }
-  }
-
-  private renderMessageEvent(event: Extract<AgentEvent, { type: "message" }>): void {
-    this.finalizeThinking();
-    this.createAgentShape("message", "Assistant", event.content);
-  }
-
-  private renderDoneEvent(event: Extract<AgentEvent, { type: "done" }>): void {
-    this.finalizeThinking();
-    this.createAgentShape(
-      "done",
-      "Completed",
-      `$${event.cost.toFixed(4)} · ${event.inputTokens} in / ${event.outputTokens} out`,
-      LAYOUT.doneHeight,
-    );
-  }
-
-  private renderErrorEvent(event: Extract<AgentEvent, { type: "error" }>): void {
-    this.finalizeThinking();
-    this.createAgentShape("error", "Error", event.message);
-  }
-
-  private formatInput(input: unknown): string {
-    if (typeof input === "string") return input;
-    try {
-      return JSON.stringify(input);
-    } catch {
-      return "[Unable to display]";
-    }
-  }
-
-  private truncate(text: string, maxLength: number = 200): string {
-    if (text.length <= maxLength) return text;
-    return text.slice(0, maxLength) + "...";
   }
 }

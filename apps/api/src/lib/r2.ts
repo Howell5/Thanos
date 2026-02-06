@@ -24,8 +24,8 @@ function getR2Config() {
     accountId: process.env.R2_ACCOUNT_ID || "",
     accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
-    bucketName: process.env.R2_BUCKET || "berryon-medias",
-    cdnDomain: process.env.R2_CDN_DOMAIN || "img.berryon.art",
+    bucketName: process.env.R2_BUCKET || "thanos-medias",
+    cdnDomain: process.env.R2_CDN_DOMAIN || "img.thanos.art",
   };
 }
 
@@ -205,4 +205,13 @@ export function generateImageKey(_userId: string, projectId: string): string {
   const timestamp = Date.now();
   const random = Math.random().toString(36).substring(2, 8);
   return `projects/${projectId}/images/${timestamp}-${random}.png`;
+}
+
+/**
+ * Generate a unique key for a media file (video, etc.)
+ */
+export function generateMediaKey(_userId: string, projectId: string, extension: string): string {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 8);
+  return `projects/${projectId}/media/${timestamp}-${random}.${extension}`;
 }

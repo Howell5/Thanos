@@ -1,20 +1,17 @@
 import { AgentRenderer } from "@/components/canvas/agent-renderer";
 import { useAgentStore } from "@/stores/use-agent-store";
-import type { Editor } from "tldraw";
 import { useEffect, useRef } from "react";
+import type { Editor } from "tldraw";
 
 /**
- * Hook to connect AgentRenderer with Agent Store
+ * Hook to manage an AgentRenderer instance.
  *
- * Creates an AgentRenderer instance and subscribes to agent events,
- * rendering each event on the canvas as it arrives.
+ * No longer auto-renders process shapes or artifacts.
+ * The renderer is available for AgentChatPanel to call
+ * renderArtifact() on demand (via "Add to Canvas" button).
  */
 export function useAgentRenderer(editor: Editor | null) {
   const rendererRef = useRef<AgentRenderer | null>(null);
-  const lastEventCountRef = useRef(0);
-
-  // Get events from store
-  const events = useAgentStore((s) => s.events);
   const status = useAgentStore((s) => s.status);
 
   // Initialize renderer when editor is ready
@@ -24,34 +21,17 @@ export function useAgentRenderer(editor: Editor | null) {
     }
   }, [editor]);
 
-  // Reset renderer when agent is reset or starts new session
+  // Reset renderer tracking when a new session starts
   useEffect(() => {
-    if (status === "running" && events.length === 0 && rendererRef.current) {
-      // New session starting, reset the renderer
+    if (status === "running" && rendererRef.current) {
       rendererRef.current.reset();
-      lastEventCountRef.current = 0;
     }
-  }, [status, events.length]);
-
-  // Render new events as they arrive
-  useEffect(() => {
-    if (!rendererRef.current) return;
-
-    // Process only new events (ones we haven't seen yet)
-    const newEvents = events.slice(lastEventCountRef.current);
-
-    for (const event of newEvents) {
-      rendererRef.current.renderEvent(event);
-    }
-
-    lastEventCountRef.current = events.length;
-  }, [events]);
+  }, [status]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       rendererRef.current = null;
-      lastEventCountRef.current = 0;
     };
   }, []);
 

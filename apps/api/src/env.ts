@@ -27,8 +27,8 @@ const envSchema = z.object({
   R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),
   R2_SECRET_ACCESS_KEY: z.string().optional(),
-  R2_BUCKET: z.string().default("berryon-medias"),
-  R2_CDN_DOMAIN: z.string().default("img.berryon.art"),
+  R2_BUCKET: z.string().default("thanos-medias"),
+  R2_CDN_DOMAIN: z.string().default("img.thanos.art"),
 });
 
 export type Env = z.infer<typeof envSchema>;

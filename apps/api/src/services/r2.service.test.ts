@@ -18,7 +18,7 @@ describe("MockR2Service", () => {
     });
 
     expect(result.key).toBe("projects/test-project/images/test.png");
-    expect(result.url).toBe("https://img.berryon.art/projects/test-project/images/test.png");
+    expect(result.url).toBe("https://img.thanos.art/projects/test-project/images/test.png");
     expect(result.size).toBe(data.length);
   });
 

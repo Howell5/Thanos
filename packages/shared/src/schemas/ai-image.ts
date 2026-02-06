@@ -139,7 +139,17 @@ export interface AIImageResponse {
 /**
  * Maximum file size for image upload (10MB)
  */
-export const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
+export const MAX_IMAGE_UPLOAD_SIZE = 10 * 1024 * 1024;
+
+/**
+ * Maximum file size for video upload (50MB)
+ */
+export const MAX_VIDEO_UPLOAD_SIZE = 50 * 1024 * 1024;
+
+/**
+ * Maximum upload size (largest of image/video limits, used for presign validation)
+ */
+export const MAX_UPLOAD_SIZE = MAX_VIDEO_UPLOAD_SIZE;
 
 /**
  * Allowed MIME types for image upload
@@ -153,6 +163,34 @@ export const ALLOWED_IMAGE_TYPES = [
 ] as const;
 
 export type AllowedImageType = (typeof ALLOWED_IMAGE_TYPES)[number];
+
+/**
+ * Allowed MIME types for video upload
+ */
+export const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/webm"] as const;
+
+export type AllowedVideoType = (typeof ALLOWED_VIDEO_TYPES)[number];
+
+/**
+ * All allowed upload MIME types (images + videos)
+ */
+export const ALLOWED_UPLOAD_TYPES = [...ALLOWED_IMAGE_TYPES, ...ALLOWED_VIDEO_TYPES] as const;
+
+export type AllowedUploadType = (typeof ALLOWED_UPLOAD_TYPES)[number];
+
+/**
+ * Check if a MIME type is a video type
+ */
+export function isVideoType(mimeType: string): boolean {
+  return (ALLOWED_VIDEO_TYPES as readonly string[]).includes(mimeType);
+}
+
+/**
+ * Get the max upload size for a given MIME type
+ */
+export function getMaxUploadSize(mimeType: string): number {
+  return isVideoType(mimeType) ? MAX_VIDEO_UPLOAD_SIZE : MAX_IMAGE_UPLOAD_SIZE;
+}
 
 /**
  * Schema for uploading an image (legacy - used for form data)
@@ -170,10 +208,10 @@ export type UploadImage = z.infer<typeof uploadImageSchema>;
 export const presignUploadSchema = z.object({
   projectId: z.string().uuid(),
   filename: z.string().min(1).max(255),
-  contentType: z.enum(ALLOWED_IMAGE_TYPES),
+  contentType: z.enum(ALLOWED_UPLOAD_TYPES),
   fileSize: z.number().int().positive().max(MAX_UPLOAD_SIZE),
-  width: z.number().int().positive().optional(),
-  height: z.number().int().positive().optional(),
+  width: z.number().int().nonnegative().optional(),
+  height: z.number().int().nonnegative().optional(),
 });
 
 export type PresignUpload = z.infer<typeof presignUploadSchema>;
@@ -186,10 +224,10 @@ export const confirmUploadSchema = z.object({
   projectId: z.string().uuid(),
   key: z.string().min(1),
   filename: z.string().min(1).max(255),
-  contentType: z.enum(ALLOWED_IMAGE_TYPES),
+  contentType: z.enum(ALLOWED_UPLOAD_TYPES),
   fileSize: z.number().int().positive(),
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
+  width: z.number().int().nonnegative().optional(),
+  height: z.number().int().nonnegative().optional(),
 });
 
 export type ConfirmUpload = z.infer<typeof confirmUploadSchema>;

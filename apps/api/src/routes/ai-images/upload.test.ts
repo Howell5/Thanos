@@ -159,7 +159,7 @@ describe("Image Upload Route", () => {
       expect(json.success).toBe(true);
 
       if (json.success) {
-        expect(json.data.r2Url).toContain("img.berryon.art");
+        expect(json.data.r2Url).toContain("img.thanos.art");
         expect(json.data.originalFileName).toBe("test-image.png");
         expect(json.data.mimeType).toBe("image/png");
       }

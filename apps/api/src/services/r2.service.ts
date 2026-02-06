@@ -9,6 +9,7 @@ import {
   type UploadResult,
   deleteFromR2,
   generateImageKey,
+  generateMediaKey,
   generateUploadUrl,
   isR2Configured,
   uploadToR2,
@@ -29,6 +30,10 @@ export class R2Service implements IR2Service {
 
   generateImageKey(userId: string, projectId: string): string {
     return generateImageKey(userId, projectId);
+  }
+
+  generateMediaKey(userId: string, projectId: string, extension: string): string {
+    return generateMediaKey(userId, projectId, extension);
   }
 
   async generatePresignedUploadUrl(

@@ -6,7 +6,12 @@
  */
 
 import { zValidator } from "@hono/zod-validator";
-import { ALLOWED_IMAGE_TYPES, MAX_UPLOAD_SIZE, uploadImageSchema } from "@repo/shared";
+import {
+  ALLOWED_UPLOAD_TYPES,
+  getMaxUploadSize,
+  isVideoType,
+  uploadImageSchema,
+} from "@repo/shared";
 import { Hono } from "hono";
 import { db } from "../../db";
 import { aiImages } from "../../db/schema";
@@ -99,10 +104,10 @@ function getImageDimensions(
 }
 
 /**
- * Validate file type against allowed types
+ * Validate file type against allowed types (images + videos)
  */
-function isAllowedImageType(mimeType: string): boolean {
-  return (ALLOWED_IMAGE_TYPES as readonly string[]).includes(mimeType);
+function isAllowedUploadType(mimeType: string): boolean {
+  return (ALLOWED_UPLOAD_TYPES as readonly string[]).includes(mimeType);
 }
 
 const uploadRoute = new Hono().post("/", zValidator("form", uploadImageSchema), async (c) => {
@@ -130,16 +135,17 @@ const uploadRoute = new Hono().post("/", zValidator("form", uploadImageSchema), 
   }
 
   // Validate file type
-  if (!isAllowedImageType(file.type)) {
+  if (!isAllowedUploadType(file.type)) {
     return errors.badRequest(
       c,
-      `Invalid file type. Allowed types: ${ALLOWED_IMAGE_TYPES.join(", ")}`,
+      `Invalid file type. Allowed types: ${ALLOWED_UPLOAD_TYPES.join(", ")}`,
     );
   }
 
-  // Validate file size
-  if (file.size > MAX_UPLOAD_SIZE) {
-    const maxSizeMB = MAX_UPLOAD_SIZE / (1024 * 1024);
+  // Validate file size (different limits for images vs videos)
+  const maxSize = getMaxUploadSize(file.type);
+  if (file.size > maxSize) {
+    const maxSizeMB = maxSize / (1024 * 1024);
     return errors.badRequest(c, `File size exceeds ${maxSizeMB}MB limit`);
   }
 
@@ -151,14 +157,28 @@ const uploadRoute = new Hono().post("/", zValidator("form", uploadImageSchema), 
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
 
-  // Get image dimensions
-  const dimensions = getImageDimensions(buffer, file.type);
-  if (!dimensions) {
-    return errors.badRequest(c, "Could not read image dimensions");
+  // Get dimensions: images parsed from buffer, videos default to 0x0
+  const isVideo = isVideoType(file.type);
+  let dimensions: { width: number; height: number };
+
+  if (isVideo) {
+    dimensions = { width: 0, height: 0 };
+  } else {
+    const imgDimensions = getImageDimensions(buffer, file.type);
+    if (!imgDimensions) {
+      return errors.badRequest(c, "Could not read image dimensions");
+    }
+    dimensions = imgDimensions;
   }
 
-  // Generate R2 key and upload
-  const imageKey = r2Service.generateImageKey(session.user.id, projectId);
+  // Generate R2 key based on file type
+  let imageKey: string;
+  if (isVideo) {
+    const ext = file.type === "video/webm" ? "webm" : "mp4";
+    imageKey = r2Service.generateMediaKey(session.user.id, projectId, ext);
+  } else {
+    imageKey = r2Service.generateImageKey(session.user.id, projectId);
+  }
 
   let uploadResult;
   try {

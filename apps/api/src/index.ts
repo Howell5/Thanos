@@ -48,6 +48,7 @@ import ordersRoute from "./routes/orders";
 import postsRoute from "./routes/posts";
 import projectsRoute from "./routes/projects";
 import userRoute from "./routes/user";
+import videosRoute from "./routes/videos/index";
 import webhooksRoute from "./routes/webhooks";
 
 const env = validateEnv();
@@ -64,7 +65,14 @@ const getAllowedOrigins = () => {
     return [frontendUrl];
   }
   // Development: allow local Vite dev server (multiple ports for concurrent instances)
-  return ["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176", "http://localhost:5177", "http://localhost:5178"];
+  return [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:5175",
+    "http://localhost:5176",
+    "http://localhost:5177",
+    "http://localhost:5178",
+  ];
 };
 
 /**
@@ -123,7 +131,7 @@ let isShuttingDown = false;
 const app = baseApp
   .get("/", (c) => {
     return c.json({
-      message: "Berryon API",
+      message: "Thanos API",
       version: "1.0.0",
     });
   })
@@ -144,6 +152,7 @@ const app = baseApp
   .route("/api/orders", ordersRoute)
   .route("/api/webhooks", webhooksRoute)
   .route("/api/user", userRoute)
+  .route("/api/videos", videosRoute)
   .route("/api/agent", agentRoute);
 
 /**

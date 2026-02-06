@@ -15,7 +15,7 @@ export {
 // Maximum concurrent generation tasks
 export const MAX_CONCURRENT_TASKS = 5;
 
-// Image models supported by berryon
+// Image models supported by thanos
 export interface ImageModel {
   id: AIModel;
   name: string;
