@@ -9,31 +9,43 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { videoClips, videos } from "../db/schema";
 import { validateEnv } from "../env";
-import { parseClipTags } from "../lib/clip-parser";
+import { parseClipJson } from "../lib/clip-parser";
 
-// Gemini video analysis prompt template
+// Gemini video analysis prompt template (with user context injection)
 const VIDEO_ANALYSIS_PROMPT_TEMPLATE = `
-请详细分析这个视频的内容，识别并标记所有符合用户需求的片段。
+请逐段分析这个视频的完整内容。按时间顺序，将视频切分为有意义的片段，对每个片段进行客观描述。
 
-## 用户需求
+## 用户补充说明
 {user_request}
 
 ## 输出格式
+以 JSON 格式输出，包含 clips 数组：
 
-对于每个符合条件的片段，使用以下 XML 格式输出：
-
-<clip time="MM:SS-MM:SS" type="片段类型">
-  <description>详细描述该片段的内容</description>
-  <reason>解释为什么这个片段符合用户需求</reason>
-</clip>
+{
+  "clips": [
+    {
+      "time": "MM:SS-MM:SS",
+      "content": "客观描述画面中发生的事情：谁/什么在做什么，在什么场景",
+      "subjects": ["画面中的主体，如：人物、产品、品牌名"],
+      "actions": ["正在发生的动作"],
+      "scene": "场景类型，如：室内/室外/工作室/街道",
+      "shot_type": "景别：特写/中景/全景/大全景",
+      "camera": "运镜：固定/推/拉/平移/跟随/手持",
+      "audio": "音频特征：人声对白/旁白/音乐/环境音/静音",
+      "text_on_screen": "画面中出现的文字、Logo、字幕（没有则为 null）",
+      "mood": "基于表情、语调、画面色调判断的情绪氛围（没有明显情绪则为 null）"
+    }
+  ]
+}
 
 ## 规则
-1. time：时间格式为 MM:SS-MM:SS（如 00:05-00:08）
-2. type：使用简短关键词（如：hook、品牌露出、产品展示）
-3. 只标记明确符合需求的片段
-4. description 和 reason 都要详细具体
-
-现在请分析视频并输出符合条件的片段。
+1. 时间格式：MM:SS-MM:SS（如 00:05-00:12）
+2. content 必须是客观描述，不要包含主观判断（如"精彩的"、"有价值的"）
+3. 不要遗漏任何片段，完整覆盖视频时间线
+4. subjects 和 actions 使用简短关键词
+5. 如果某个字段无法判断，设为 null
+6. 参考用户补充说明来理解视频上下文，但描述仍需客观
+7. 只返回 JSON，不要添加其他内容
 `;
 
 // Max video size for Gemini (20MB)
@@ -99,13 +111,13 @@ async function analyzeVideoBackground(videoId: string, analysisRequest?: string)
     }
 
     // 4. Analyze video with Gemini
-    const userRequest = analysisRequest || video.analysisRequest || DEFAULT_VIDEO_ANALYSIS_PROMPT;
-    const analysisResult = await analyzeVideoWithGemini(video.r2Url, userRequest);
+    const userRequest = analysisRequest || video.analysisRequest;
+    const analysisResult = await analyzeVideoWithGemini(video.r2Url, userRequest || undefined);
 
     console.log(`[VideoAnalysis] Gemini analysis complete for ${videoId}, parsing clips...`);
 
-    // 5. Parse <clip> XML tags
-    const clips = parseClipTags(analysisResult, videoId);
+    // 5. Parse JSON clip data
+    const clips = parseClipJson(analysisResult, videoId);
 
     console.log(`[VideoAnalysis] Parsed ${clips.length} clips for ${videoId}`);
 
@@ -121,7 +133,7 @@ async function analyzeVideoBackground(videoId: string, analysisRequest?: string)
         .update(videos)
         .set({
           analysisStatus: "done",
-          analysisRequest: userRequest,
+          analysisRequest: userRequest || null,
           analyzedAt: new Date(),
           updatedAt: new Date(),
         })
@@ -149,7 +161,7 @@ async function analyzeVideoBackground(videoId: string, analysisRequest?: string)
  * Analyze video using Gemini Flash
  * Downloads video, sends to Gemini, returns raw analysis text
  */
-async function analyzeVideoWithGemini(videoUrl: string, userRequest: string): Promise<string> {
+async function analyzeVideoWithGemini(videoUrl: string, userRequest?: string): Promise<string> {
   console.log(`[VideoAnalysis] Downloading video from ${videoUrl}`);
 
   // 1. Download video
@@ -166,16 +178,23 @@ async function analyzeVideoWithGemini(videoUrl: string, userRequest: string): Pr
   // 2. Check size limit
   if (sizeMB > MAX_VIDEO_SIZE_MB) {
     // TODO: Implement video compression
-    throw new Error(`Video too large (${sizeMB.toFixed(2)}MB). Max ${MAX_VIDEO_SIZE_MB}MB supported.`);
+    throw new Error(
+      `Video too large (${sizeMB.toFixed(2)}MB). Max ${MAX_VIDEO_SIZE_MB}MB supported.`,
+    );
   }
 
   // 3. Build prompt
-  const prompt = VIDEO_ANALYSIS_PROMPT_TEMPLATE.replace("{user_request}", userRequest);
+  let prompt: string;
+  if (userRequest) {
+    prompt = VIDEO_ANALYSIS_PROMPT_TEMPLATE.replace("{user_request}", userRequest);
+  } else {
+    prompt = DEFAULT_VIDEO_ANALYSIS_PROMPT;
+  }
 
   // 4. Call Gemini
   const ai = getGeminiClient();
 
-  console.log(`[VideoAnalysis] Sending to Gemini for analysis...`);
+  console.log("[VideoAnalysis] Sending to Gemini for analysis...");
 
   const geminiResponse = await ai.models.generateContent({
     model: "gemini-2.0-flash",

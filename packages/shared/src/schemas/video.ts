@@ -3,17 +3,13 @@ import { z } from "zod";
 /**
  * Video analysis status
  */
-export const videoAnalysisStatusSchema = z.enum([
-  "pending",
-  "analyzing",
-  "done",
-  "failed",
-]);
+export const videoAnalysisStatusSchema = z.enum(["pending", "analyzing", "done", "failed"]);
 
 export type VideoAnalysisStatus = z.infer<typeof videoAnalysisStatusSchema>;
 
 /**
  * Video clip data (from Gemini analysis)
+ * Objective description + structured metadata
  */
 export const videoClipSchema = z.object({
   id: z.string().uuid(),
@@ -21,9 +17,17 @@ export const videoClipSchema = z.object({
   timeRange: z.string(), // "00:05-00:08"
   startTime: z.number().int().nonnegative(),
   endTime: z.number().int().nonnegative(),
-  clipType: z.string(),
-  description: z.string(),
-  reason: z.string(),
+  // Objective description
+  content: z.string(),
+  // Structured metadata
+  subjects: z.array(z.string()),
+  actions: z.array(z.string()),
+  scene: z.string().nullable(),
+  shotType: z.string().nullable(),
+  camera: z.string().nullable(),
+  audio: z.string().nullable(),
+  textOnScreen: z.string().nullable(),
+  mood: z.string().nullable(),
   createdAt: z.string(),
 });
 
@@ -96,7 +100,7 @@ export const searchClipsSchema = z.object({
   query: z.string().min(1).max(1000),
   // Optional filters
   videoIds: z.array(z.string().uuid()).optional(),
-  clipTypes: z.array(z.string()).optional(),
+  subjects: z.array(z.string()).optional(),
   maxDuration: z.number().int().positive().optional(),
 });
 
@@ -113,8 +117,7 @@ export const matchedClipSchema = z.object({
   timeRange: z.string(),
   startTime: z.number().int(),
   endTime: z.number().int(),
-  clipType: z.string(),
-  description: z.string(),
+  content: z.string(),
   matchScore: z.number().min(1).max(10),
   matchReason: z.string(),
 });
@@ -132,19 +135,36 @@ export const searchClipsResponseSchema = z.object({
 export type SearchClipsResponse = z.infer<typeof searchClipsResponseSchema>;
 
 /**
- * Default analysis prompt for video indexing
+ * Default analysis prompt for video indexing (objective, no value judgment)
  */
 export const DEFAULT_VIDEO_ANALYSIS_PROMPT = `
-请详细分析这个视频，识别所有有剪辑价值的片段。按以下维度标记：
+请逐段分析这个视频的完整内容。按时间顺序，将视频切分为有意义的片段，对每个片段进行客观描述。
 
-1. **hook** - 适合作为短视频开场的片段（视觉冲击、悬念、吸引注意力）
-2. **产品展示** - 产品全貌或特写镜头
-3. **品牌露出** - Logo、品牌名称清晰可见的片段
-4. **拆箱/开箱** - 拆封、打开包装的动作
-5. **使用演示** - 产品使用过程展示
-6. **情绪高点** - 惊喜、满意、兴奋等情绪表达
-7. **转场素材** - 适合用作转场的镜头
-8. **其他亮点** - 任何有剪辑价值的片段
+## 输出格式
+以 JSON 格式输出，包含 clips 数组：
 
-请尽可能详细地描述每个片段的内容和特征。
+{
+  "clips": [
+    {
+      "time": "MM:SS-MM:SS",
+      "content": "客观描述画面中发生的事情：谁/什么在做什么，在什么场景",
+      "subjects": ["画面中的主体，如：人物、产品、品牌名"],
+      "actions": ["正在发生的动作"],
+      "scene": "场景类型，如：室内/室外/工作室/街道",
+      "shot_type": "景别：特写/中景/全景/大全景",
+      "camera": "运镜：固定/推/拉/平移/跟随/手持",
+      "audio": "音频特征：人声对白/旁白/音乐/环境音/静音",
+      "text_on_screen": "画面中出现的文字、Logo、字幕（没有则为 null）",
+      "mood": "基于表情、语调、画面色调判断的情绪氛围（没有明显情绪则为 null）"
+    }
+  ]
+}
+
+## 规则
+1. 时间格式：MM:SS-MM:SS（如 00:05-00:12）
+2. content 必须是客观描述，不要包含主观判断（如"精彩的"、"有价值的"）
+3. 不要遗漏任何片段，完整覆盖视频时间线
+4. subjects 和 actions 使用简短关键词
+5. 如果某个字段无法判断，设为 null
+6. 只返回 JSON，不要添加其他内容
 `.trim();

@@ -55,9 +55,15 @@ interface ClipInfo {
   video_file_name: string | null;
   time_range: string;
   duration_seconds: number;
-  clip_type: string;
-  description: string;
-  reason: string;
+  content: string;
+  subjects: string[];
+  actions: string[];
+  scene: string | null;
+  shot_type: string | null;
+  camera: string | null;
+  audio: string | null;
+  text_on_screen: string | null;
+  mood: string | null;
 }
 
 // Internal clip with full data
@@ -69,9 +75,15 @@ export interface ClipWithVideo {
   timeRange: string;
   startTime: number;
   endTime: number;
-  clipType: string;
-  description: string;
-  reason: string;
+  content: string;
+  subjects: string[];
+  actions: string[];
+  scene: string | null;
+  shotType: string | null;
+  camera: string | null;
+  audio: string | null;
+  textOnScreen: string | null;
+  mood: string | null;
 }
 
 /**
@@ -121,9 +133,15 @@ export async function searchClipsWithLLM(
     video_file_name: clip.videoFileName,
     time_range: clip.timeRange,
     duration_seconds: clip.endTime - clip.startTime,
-    clip_type: clip.clipType,
-    description: clip.description,
-    reason: clip.reason,
+    content: clip.content,
+    subjects: clip.subjects,
+    actions: clip.actions,
+    scene: clip.scene,
+    shot_type: clip.shotType,
+    camera: clip.camera,
+    audio: clip.audio,
+    text_on_screen: clip.textOnScreen,
+    mood: clip.mood,
   }));
 
   // Build prompt
@@ -182,8 +200,7 @@ export async function searchClipsWithLLM(
           timeRange: clipData.timeRange,
           startTime: clipData.startTime,
           endTime: clipData.endTime,
-          clipType: clipData.clipType,
-          description: clipData.description,
+          content: clipData.content,
           matchScore: match.match_score,
           matchReason: match.match_reason,
         });
@@ -237,17 +254,14 @@ function parseSearchResponse(text: string): {
  * Fallback simple text-based search
  * Used when Gemini is not configured or fails
  */
-function fallbackSearch(
-  query: string,
-  clips: ClipWithVideo[],
-  topK: number,
-): SearchClipsResponse {
+function fallbackSearch(query: string, clips: ClipWithVideo[], topK: number): SearchClipsResponse {
   const queryLower = query.toLowerCase();
   const keywords = queryLower.split(/\s+/).filter((k) => k.length > 1);
 
   // Score each clip by keyword matches
   const scored = clips.map((clip) => {
-    const searchText = `${clip.clipType} ${clip.description} ${clip.reason}`.toLowerCase();
+    const searchText =
+      `${clip.content} ${clip.subjects.join(" ")} ${clip.actions.join(" ")}`.toLowerCase();
     let score = 0;
 
     for (const keyword of keywords) {
@@ -256,9 +270,11 @@ function fallbackSearch(
       }
     }
 
-    // Boost for clip type match
-    if (clip.clipType.toLowerCase().includes(queryLower)) {
-      score += 3;
+    // Boost for subject match
+    for (const subject of clip.subjects) {
+      if (subject.toLowerCase().includes(queryLower)) {
+        score += 3;
+      }
     }
 
     return { clip, score };
@@ -278,8 +294,7 @@ function fallbackSearch(
     timeRange: clip.timeRange,
     startTime: clip.startTime,
     endTime: clip.endTime,
-    clipType: clip.clipType,
-    description: clip.description,
+    content: clip.content,
     matchScore: Math.min(10, Math.max(1, score)),
     matchReason: `Keyword match for: "${query}"`,
   }));

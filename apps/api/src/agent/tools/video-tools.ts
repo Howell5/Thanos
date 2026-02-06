@@ -8,7 +8,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
 import { videos } from "../../db/schema";
-import { searchClipsWithLLM, type ClipWithVideo } from "../../services/clip-search.service";
+import { type ClipWithVideo, searchClipsWithLLM } from "../../services/clip-search.service";
 import { triggerVideoAnalysis } from "../../services/video-analysis.service";
 
 /**
@@ -85,26 +85,39 @@ export function createVideoToolsServer(projectId: string) {
         "search_video_clips",
         "Search for video clips that match a natural language query. Uses AI to find the most relevant clips based on their descriptions and content.",
         {
-          query: z.string().min(1).describe("Natural language description of the clips you're looking for"),
+          query: z
+            .string()
+            .min(1)
+            .describe("Natural language description of the clips you're looking for"),
           videoIds: z
             .array(z.string().uuid())
             .optional()
             .describe("Optional: limit search to specific videos"),
-          clipTypes: z
+          subjects: z
             .array(z.string())
             .optional()
-            .describe("Optional: filter by clip types (e.g., 'hook', 'product_demo')"),
+            .describe(
+              "Optional: filter by subjects appearing in clips (e.g., 'person', 'product name')",
+            ),
           maxDuration: z
             .number()
             .positive()
             .optional()
             .describe("Optional: maximum clip duration in seconds"),
-          limit: z.number().min(1).max(20).default(10).describe("Maximum number of results to return"),
+          limit: z
+            .number()
+            .min(1)
+            .max(20)
+            .default(10)
+            .describe("Maximum number of results to return"),
         },
         async (args) => {
           try {
             // Build video query conditions
-            const videoConditions = [eq(videos.projectId, projectId), eq(videos.analysisStatus, "done")];
+            const videoConditions = [
+              eq(videos.projectId, projectId),
+              eq(videos.analysisStatus, "done"),
+            ];
             if (args.videoIds?.length) {
               videoConditions.push(inArray(videos.id, args.videoIds));
             }
@@ -135,8 +148,12 @@ export function createVideoToolsServer(projectId: string) {
             for (const video of videoList) {
               for (const clip of video.clips) {
                 // Apply filters
-                if (args.clipTypes?.length && !args.clipTypes.includes(clip.clipType)) {
-                  continue;
+                if (args.subjects?.length) {
+                  const clipSubjects = (clip.subjects ?? []).map((s) => s.toLowerCase());
+                  const hasMatch = args.subjects.some((s) =>
+                    clipSubjects.some((cs) => cs.includes(s.toLowerCase())),
+                  );
+                  if (!hasMatch) continue;
                 }
                 if (args.maxDuration && clip.endTime - clip.startTime > args.maxDuration) {
                   continue;
@@ -149,9 +166,15 @@ export function createVideoToolsServer(projectId: string) {
                   timeRange: clip.timeRange,
                   startTime: clip.startTime,
                   endTime: clip.endTime,
-                  clipType: clip.clipType,
-                  description: clip.description,
-                  reason: clip.reason,
+                  content: clip.content,
+                  subjects: clip.subjects ?? [],
+                  actions: clip.actions ?? [],
+                  scene: clip.scene,
+                  shotType: clip.shotType,
+                  camera: clip.camera,
+                  audio: clip.audio,
+                  textOnScreen: clip.textOnScreen,
+                  mood: clip.mood,
                 });
               }
             }
@@ -236,9 +259,15 @@ export function createVideoToolsServer(projectId: string) {
                 timeRange: c.timeRange,
                 startTime: c.startTime,
                 endTime: c.endTime,
-                clipType: c.clipType,
-                description: c.description,
-                reason: c.reason,
+                content: c.content,
+                subjects: c.subjects ?? [],
+                actions: c.actions ?? [],
+                scene: c.scene,
+                shotType: c.shotType,
+                camera: c.camera,
+                audio: c.audio,
+                textOnScreen: c.textOnScreen,
+                mood: c.mood,
               })),
             };
 

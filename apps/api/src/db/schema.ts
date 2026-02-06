@@ -207,7 +207,7 @@ export const videos = pgTable("videos", {
 
 /**
  * Video clips table
- * Stores analyzed clip segments from videos
+ * Stores analyzed clip segments from videos with structured metadata
  */
 export const videoClips = pgTable("video_clips", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -218,11 +218,17 @@ export const videoClips = pgTable("video_clips", {
   timeRange: text("time_range").notNull(), // "00:05-00:08"
   startTime: integer("start_time").notNull(), // in seconds
   endTime: integer("end_time").notNull(), // in seconds
-  // Clip classification
-  clipType: text("clip_type").notNull(), // "hook", "品牌露出", "产品展示", etc.
-  // Analysis content
-  description: text("description").notNull(),
-  reason: text("reason").notNull(),
+  // Objective description
+  content: text("content").notNull(),
+  // Structured metadata
+  subjects: text("subjects").array().notNull().default([]),
+  actions: text("actions").array().notNull().default([]),
+  scene: text("scene"),
+  shotType: text("shot_type"),
+  camera: text("camera"),
+  audio: text("audio"),
+  textOnScreen: text("text_on_screen"),
+  mood: text("mood"),
   // Timestamps
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull().defaultNow(),
 });

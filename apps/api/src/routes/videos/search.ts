@@ -4,14 +4,14 @@
  */
 
 import { zValidator } from "@hono/zod-validator";
-import { searchClipsSchema, type SearchClipsResponse } from "@repo/shared";
+import { type SearchClipsResponse, searchClipsSchema } from "@repo/shared";
 import { and, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { db } from "../../db";
 import { videos } from "../../db/schema";
 import { getSessionOrMock } from "../../lib/mock-session";
 import { errors, ok } from "../../lib/response";
-import { searchClipsWithLLM, type ClipWithVideo } from "../../services/clip-search.service";
+import { type ClipWithVideo, searchClipsWithLLM } from "../../services/clip-search.service";
 import { verifyProjectAccess } from "./helpers";
 
 const searchRoute = new Hono().post("/search", zValidator("json", searchClipsSchema), async (c) => {
@@ -21,7 +21,7 @@ const searchRoute = new Hono().post("/search", zValidator("json", searchClipsSch
     return errors.unauthorized(c);
   }
 
-  const { projectId, query, videoIds, clipTypes, maxDuration } = c.req.valid("json");
+  const { projectId, query, videoIds, subjects, maxDuration } = c.req.valid("json");
   const userId = session.user.id;
 
   // Verify project access
@@ -55,8 +55,12 @@ const searchRoute = new Hono().post("/search", zValidator("json", searchClipsSch
   for (const video of videoList) {
     for (const clip of video.clips) {
       // Apply filters
-      if (clipTypes?.length && !clipTypes.includes(clip.clipType)) {
-        continue;
+      if (subjects?.length) {
+        const clipSubjects = (clip.subjects ?? []).map((s) => s.toLowerCase());
+        const hasMatch = subjects.some((s) =>
+          clipSubjects.some((cs) => cs.includes(s.toLowerCase())),
+        );
+        if (!hasMatch) continue;
       }
       if (maxDuration && clip.endTime - clip.startTime > maxDuration) {
         continue;
@@ -69,9 +73,15 @@ const searchRoute = new Hono().post("/search", zValidator("json", searchClipsSch
         timeRange: clip.timeRange,
         startTime: clip.startTime,
         endTime: clip.endTime,
-        clipType: clip.clipType,
-        description: clip.description,
-        reason: clip.reason,
+        content: clip.content,
+        subjects: clip.subjects ?? [],
+        actions: clip.actions ?? [],
+        scene: clip.scene,
+        shotType: clip.shotType,
+        camera: clip.camera,
+        audio: clip.audio,
+        textOnScreen: clip.textOnScreen,
+        mood: clip.mood,
       });
     }
   }

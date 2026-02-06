@@ -1,6 +1,6 @@
 /**
  * Clip Parser
- * Parses <clip> XML tags from Gemini video analysis response
+ * Parses JSON clip data from Gemini video analysis response
  */
 
 export interface ClipData {
@@ -8,53 +8,96 @@ export interface ClipData {
   timeRange: string;
   startTime: number;
   endTime: number;
-  clipType: string;
-  description: string;
-  reason: string;
+  content: string;
+  subjects: string[];
+  actions: string[];
+  scene: string | null;
+  shotType: string | null;
+  camera: string | null;
+  audio: string | null;
+  textOnScreen: string | null;
+  mood: string | null;
+}
+
+interface RawClip {
+  time: string;
+  content: string;
+  subjects?: string[] | null;
+  actions?: string[] | null;
+  scene?: string | null;
+  shot_type?: string | null;
+  camera?: string | null;
+  audio?: string | null;
+  text_on_screen?: string | null;
+  mood?: string | null;
 }
 
 /**
- * Parse <clip> XML tags from analysis text
- * Supports both single-line attributes and nested description/reason tags
+ * Parse JSON clip data from Gemini analysis response
  */
-export function parseClipTags(analysisText: string, videoId: string): ClipData[] {
-  // Match <clip time="..." type="...">...</clip> pattern
-  const clipPattern = /<clip\s+time="([^"]+)"\s+type="([^"]+)">([\s\S]*?)<\/clip>/gi;
-  const descPattern = /<description>([\s\S]*?)<\/description>/i;
-  const reasonPattern = /<reason>([\s\S]*?)<\/reason>/i;
+export function parseClipJson(analysisText: string, videoId: string): ClipData[] {
+  // Strip markdown code fences if present
+  let jsonText = analysisText.trim();
+  if (jsonText.startsWith("```json")) {
+    jsonText = jsonText.slice(7);
+  }
+  if (jsonText.startsWith("```")) {
+    jsonText = jsonText.slice(3);
+  }
+  if (jsonText.endsWith("```")) {
+    jsonText = jsonText.slice(0, -3);
+  }
+  jsonText = jsonText.trim();
+
+  let parsed: { clips: RawClip[] };
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (error) {
+    console.error("[ClipParser] Failed to parse JSON:", jsonText.slice(0, 200));
+    throw new Error("Failed to parse clip analysis JSON");
+  }
+
+  if (!parsed.clips || !Array.isArray(parsed.clips)) {
+    console.warn("[ClipParser] No clips array in parsed JSON");
+    return [];
+  }
 
   const clips: ClipData[] = [];
 
-  let match: RegExpExecArray | null;
-  while ((match = clipPattern.exec(analysisText)) !== null) {
-    const [, timeRange, clipType, innerContent] = match;
-
+  for (const raw of parsed.clips) {
     try {
-      const [startStr, endStr] = timeRange.split("-");
+      if (!raw.time || !raw.content) {
+        console.warn("[ClipParser] Skipping clip missing time or content");
+        continue;
+      }
+
+      const [startStr, endStr] = raw.time.split("-");
       const startTime = timeStrToSeconds(startStr.trim());
       const endTime = timeStrToSeconds(endStr.trim());
 
       // Skip invalid time ranges
       if (startTime < 0 || endTime < 0 || startTime >= endTime) {
-        console.warn(`[ClipParser] Skipping invalid time range: ${timeRange}`);
+        console.warn(`[ClipParser] Skipping invalid time range: ${raw.time}`);
         continue;
       }
 
-      const descMatch = descPattern.exec(innerContent);
-      const reasonMatch = reasonPattern.exec(innerContent);
-
       clips.push({
         videoId,
-        timeRange: timeRange.trim(),
+        timeRange: raw.time.trim(),
         startTime,
         endTime,
-        clipType: clipType.trim(),
-        description: descMatch ? descMatch[1].trim() : "",
-        reason: reasonMatch ? reasonMatch[1].trim() : "",
+        content: raw.content.trim(),
+        subjects: toStringArray(raw.subjects),
+        actions: toStringArray(raw.actions),
+        scene: raw.scene?.trim() || null,
+        shotType: raw.shot_type?.trim() || null,
+        camera: raw.camera?.trim() || null,
+        audio: raw.audio?.trim() || null,
+        textOnScreen: raw.text_on_screen?.trim() || null,
+        mood: raw.mood?.trim() || null,
       });
     } catch (error) {
-      console.warn(`[ClipParser] Skipping invalid clip:`, error);
-      continue;
+      console.warn("[ClipParser] Skipping invalid clip:", error);
     }
   }
 
@@ -62,12 +105,20 @@ export function parseClipTags(analysisText: string, videoId: string): ClipData[]
 }
 
 /**
+ * Safely convert a value to a string array
+ */
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+}
+
+/**
  * Convert time string (MM:SS or HH:MM:SS) to seconds
  */
 export function timeStrToSeconds(timeStr: string): number {
-  const parts = timeStr.split(":").map((p) => parseInt(p, 10));
+  const parts = timeStr.split(":").map((p) => Number.parseInt(p, 10));
 
-  if (parts.some(isNaN)) {
+  if (parts.some(Number.isNaN)) {
     throw new Error(`Invalid time format: ${timeStr}`);
   }
 
@@ -75,7 +126,8 @@ export function timeStrToSeconds(timeStr: string): number {
     // MM:SS format
     const [minutes, seconds] = parts;
     return minutes * 60 + seconds;
-  } else if (parts.length === 3) {
+  }
+  if (parts.length === 3) {
     // HH:MM:SS format
     const [hours, minutes, seconds] = parts;
     return hours * 3600 + minutes * 60 + seconds;
