@@ -3,7 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
-import { createVideoToolsServer, VIDEO_TOOL_NAMES } from "../agent/tools/video-tools";
+import { VIDEO_TOOL_NAMES, createVideoToolsServer } from "../agent/tools/video-tools";
 
 // Request schema
 const runAgentSchema = z.object({

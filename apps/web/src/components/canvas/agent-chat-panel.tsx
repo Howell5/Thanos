@@ -274,7 +274,9 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
             const hasSubsequentMessage = i < messages.length - 1;
             toolCompleted = hasSubsequentMessage || !isRunning;
           }
-          return <MessageRenderer key={`${msg.type}-${i}`} msg={msg} toolCompleted={toolCompleted} />;
+          return (
+            <MessageRenderer key={`${msg.type}-${i}`} msg={msg} toolCompleted={toolCompleted} />
+          );
         })}
 
         {/* Show store error if not in messages */}
@@ -289,7 +291,9 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={hasSession ? "Continue conversation... (⌘+Enter)" : "Enter prompt... (⌘+Enter to run)"}
+          placeholder={
+            hasSession ? "Continue conversation... (⌘+Enter)" : "Enter prompt... (⌘+Enter to run)"
+          }
           disabled={isRunning}
           rows={3}
           className="mb-2 w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:border-blue-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50"

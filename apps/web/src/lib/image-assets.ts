@@ -99,6 +99,24 @@ export const getImageDimensions = (url: string): Promise<{ width: number; height
   });
 };
 
+// Get video dimensions from a File object
+export const getVideoDimensions = (file: File): Promise<{ width: number; height: number }> => {
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    const url = URL.createObjectURL(file);
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: video.videoWidth, height: video.videoHeight });
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: 320, height: 180 });
+    };
+    video.src = url;
+  });
+};
+
 // Check if file is an image
 export const isImageFile = (file: File): boolean => {
   return file.type.startsWith("image/");

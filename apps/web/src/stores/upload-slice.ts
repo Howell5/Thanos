@@ -25,7 +25,7 @@ interface MediaMetadata {
  * Uses browser's Image API for images, and <video> element for videos
  */
 function getMediaMetadata(file: File): Promise<MediaMetadata> {
-  if (isVideoType(file.type)) {
+  if (file.type.startsWith("video/")) {
     return new Promise((resolve) => {
       const video = document.createElement("video");
       const url = URL.createObjectURL(file);

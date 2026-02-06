@@ -16,6 +16,8 @@ import {
   DEFAULT_MAX_IMAGE_SIZE,
   type ImageMeta,
   createImageAssetStoreWithUpload,
+  getVideoDimensions,
+  isVideoFile,
 } from "@/lib/image-assets";
 import { ROUTES } from "@/lib/routes";
 import { useAgentStore } from "@/stores/use-agent-store";
@@ -27,8 +29,8 @@ import { toast } from "sonner";
 import { AgentChatPanel, AgentPanelToggle } from "./agent-chat-panel";
 import { BottomPromptPanel } from "./bottom-prompt-panel";
 import { RichCardShapeUtil } from "./rich-card-shape";
+import { VIDEO_SHAPE_TYPE, VideoShapeUtil } from "./video-shape";
 
-// Auto-save debounce delay in milliseconds
 const AUTO_SAVE_DELAY = 2000;
 import { FloatingToolbar } from "./floating-toolbar";
 import { GeneratingOverlay } from "./generating-overlay";
@@ -162,18 +164,12 @@ function InFrontOfTheCanvas() {
   );
 }
 
-// Vertical toolbar component
 function VerticalToolbar() {
   return <DefaultToolbar orientation="vertical" />;
 }
 
-// UI components configuration - hide unnecessary tldraw UI elements
-// Keep: Toolbar (vertical), ContextMenu (right-click), Dialogs, Toasts
-// Hide: StylePanel, NavigationPanel, MainMenu, PageMenu, ActionsMenu, HelpMenu, etc.
 const uiComponents: Partial<TLUiComponents> = {
-  // Override toolbar to be vertical
   Toolbar: VerticalToolbar,
-  // Hide panels we don't need
   StylePanel: null,
   NavigationPanel: null,
   MainMenu: null,
@@ -187,7 +183,6 @@ const uiComponents: Partial<TLUiComponents> = {
   TopPanel: null,
   SharePanel: null,
   Minimap: null,
-  // Hide native image toolbar (we have custom FloatingToolbar)
   ImageToolbar: null,
 };
 
@@ -429,6 +424,52 @@ export function TldrawCanvas({
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
 
+  // Intercept video file drops before tldraw handles them
+  const handleDropCapture = useCallback(
+    async (e: React.DragEvent<HTMLDivElement>) => {
+      if (!e.dataTransfer?.files?.length || !editorRef.current) return;
+      const videoFiles = Array.from(e.dataTransfer.files).filter(isVideoFile);
+      if (videoFiles.length === 0) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      const editor = editorRef.current;
+      const dropPoint = editor.screenToPage({ x: e.clientX, y: e.clientY });
+
+      for (const file of videoFiles) {
+        try {
+          const [result, dims] = await Promise.all([
+            uploadImage(file, ""),
+            getVideoDimensions(file),
+          ]);
+          const maxEdge = Math.max(dims.width, dims.height);
+          const scale = maxEdge > DEFAULT_MAX_IMAGE_SIZE ? DEFAULT_MAX_IMAGE_SIZE / maxEdge : 1;
+          const w = Math.round(dims.width * scale);
+          const h = Math.round(dims.height * scale);
+
+          editor.createShape({
+            type: VIDEO_SHAPE_TYPE,
+            x: dropPoint.x - w / 2,
+            y: dropPoint.y - h / 2,
+            props: { w, h, videoUrl: result.r2Url, fileName: file.name },
+            meta: {
+              source: "uploaded",
+              videoId: result.videoId,
+              duration: result.duration,
+              originalWidth: dims.width,
+              originalHeight: dims.height,
+            } as ImageMeta,
+          });
+          requestCanvasSave();
+        } catch (error) {
+          console.error("Failed to upload video:", error);
+          toast.error("视频上传失败");
+        }
+      }
+    },
+    [uploadImage],
+  );
+
   // Update props store for InFrontOfTheCanvas
   canvasPropsStore = {
     projectName,
@@ -438,9 +479,9 @@ export function TldrawCanvas({
   };
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full" onDropCapture={handleDropCapture}>
       <Tldraw
-        shapeUtils={[RichCardShapeUtil]}
+        shapeUtils={[RichCardShapeUtil, VideoShapeUtil]}
         assets={assetStore}
         components={{
           InFrontOfTheCanvas: InFrontOfTheCanvas,
