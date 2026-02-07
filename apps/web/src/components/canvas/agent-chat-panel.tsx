@@ -1,7 +1,8 @@
 import { Button } from "@/components/ui/button";
+import { requestCanvasAddVideo } from "@/lib/canvas-events";
 import type { ChatMessage } from "@/stores/use-agent-store";
 import { selectCanStart, selectIsRunning, useAgentStore } from "@/stores/use-agent-store";
-import { ChevronRight, Loader2, Play, RotateCcw, Send, Square, X } from "lucide-react";
+import { ChevronRight, Film, Loader2, Play, RotateCcw, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 // ─── Props ──────────────────────────────────────────────────
@@ -27,6 +28,52 @@ function TextMessage({ content, finalized }: { content: string; finalized: boole
   );
 }
 
+/** Try to extract a video URL from tool output JSON */
+function extractVideoUrl(output: string | undefined): string | null {
+  if (!output) return null;
+  try {
+    const data = JSON.parse(output);
+    if (data.outputUrl && typeof data.outputUrl === "string" && data.outputUrl.endsWith(".mp4")) {
+      return data.outputUrl;
+    }
+  } catch {
+    // Not JSON, try regex
+    const match = output.match(/https?:\/\/[^\s"]+\.mp4/);
+    if (match) return match[0];
+  }
+  return null;
+}
+
+function VideoResultCard({ url }: { url: string }) {
+  const [added, setAdded] = useState(false);
+
+  const addToCanvas = useCallback(() => {
+    requestCanvasAddVideo(url, "Rendered Video");
+    setAdded(true);
+  }, [url]);
+
+  return (
+    <div className="mx-3 overflow-hidden rounded-lg border border-emerald-200 bg-emerald-50">
+      <div className="aspect-video w-full bg-black">
+        {/* biome-ignore lint/a11y/useMediaCaption: agent-rendered video */}
+        <video src={url} controls preload="metadata" className="h-full w-full object-contain" />
+      </div>
+      <div className="flex items-center justify-between px-3 py-2">
+        <span className="text-[11px] font-medium text-emerald-700">Video rendered</span>
+        <button
+          type="button"
+          onClick={addToCanvas}
+          disabled={added}
+          className="flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-emerald-700 disabled:bg-emerald-300"
+        >
+          <Film className="h-3 w-3" />
+          {added ? "Added" : "Add to Canvas"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ToolMessage({
   tool,
   input,
@@ -46,25 +93,31 @@ function ToolMessage({
     return <AskUserQuestionMessage input={input} />;
   }
 
+  // Detect video URL in tool output
+  const videoUrl = extractVideoUrl(output);
+
   return (
-    <div className="mx-3 flex items-start gap-2 py-1.5">
-      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center">
-        {completed ? (
-          <span className="text-xs text-green-500">✓</span>
-        ) : (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
-        )}
-      </span>
-      <div className="min-w-0 flex-1">
-        <span className="text-xs font-medium text-slate-700">{tool}</span>
-        {inputPreview && <p className="truncate text-[11px] text-slate-400">{inputPreview}</p>}
-        {output && (
-          <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-400">
-            {output.length > 150 ? `${output.slice(0, 150)}...` : output}
-          </p>
-        )}
+    <>
+      <div className="mx-3 flex items-start gap-2 py-1.5">
+        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center">
+          {completed ? (
+            <span className="text-xs text-green-500">✓</span>
+          ) : (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+          )}
+        </span>
+        <div className="min-w-0 flex-1">
+          <span className="text-xs font-medium text-slate-700">{tool}</span>
+          {inputPreview && <p className="truncate text-[11px] text-slate-400">{inputPreview}</p>}
+          {output && !videoUrl && (
+            <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-400">
+              {output.length > 150 ? `${output.slice(0, 150)}...` : output}
+            </p>
+          )}
+        </div>
       </div>
-    </div>
+      {videoUrl && <VideoResultCard url={videoUrl} />}
+    </>
   );
 }
 

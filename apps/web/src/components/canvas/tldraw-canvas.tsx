@@ -3,6 +3,7 @@ import {
   type Editor,
   type TLUiComponents,
   Tldraw,
+  createShapeId,
   getSnapshot,
   loadSnapshot,
   useEditor,
@@ -11,7 +12,12 @@ import "tldraw/tldraw.css";
 import { Button } from "@/components/ui/button";
 import { useAgentRenderer } from "@/hooks/use-agent-renderer";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
-import { onCanvasSaveRequest, requestCanvasSave } from "@/lib/canvas-events";
+import {
+  type AddVideoPayload,
+  onCanvasAddVideoRequest,
+  onCanvasSaveRequest,
+  requestCanvasSave,
+} from "@/lib/canvas-events";
 import {
   DEFAULT_MAX_IMAGE_SIZE,
   type ImageMeta,
@@ -26,7 +32,6 @@ import { ArrowLeft, Check, Loader2, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { AgentChatPanel, AgentPanelToggle } from "./agent-chat-panel";
 import { BottomPromptPanel } from "./bottom-prompt-panel";
 import { RichCardShapeUtil } from "./rich-card-shape";
 import { VIDEO_SHAPE_TYPE, VideoShapeUtil } from "./video-shape";
@@ -90,36 +95,34 @@ function CanvasEventHandler() {
     };
   }, [editor, cancelUpload]);
 
+  // Listen for video add requests from outside tldraw (e.g. AgentChatPanel)
+  useEffect(() => {
+    return onCanvasAddVideoRequest(({ url, fileName }: AddVideoPayload) => {
+      const center = editor.screenToPage(editor.getViewportScreenCenter());
+      editor.createShape({
+        id: createShapeId(),
+        type: VIDEO_SHAPE_TYPE,
+        x: center.x - 240,
+        y: center.y - 135,
+        props: { w: 480, h: 270, videoUrl: url, fileName: fileName ?? "Rendered Video" },
+      });
+    });
+  }, [editor]);
+
   return null;
 }
 
 // Component rendered in front of the canvas (highest z-index)
 function InFrontOfTheCanvas() {
   const props = canvasPropsStore;
-  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
-  const agentStatus = useAgentStore((s) => s.status);
-
-  // Auto-open panel when agent starts running
-  useEffect(() => {
-    if (agentStatus === "running") {
-      setAgentPanelOpen(true);
-    }
-  }, [agentStatus]);
-
   return (
     <>
       <FloatingToolbar />
       <BottomPromptPanel />
-      {agentPanelOpen ? (
-        <AgentChatPanel open={agentPanelOpen} onClose={() => setAgentPanelOpen(false)} />
-      ) : (
-        <AgentPanelToggle onClick={() => setAgentPanelOpen(true)} />
-      )}
       <GeneratingOverlay />
       <InpaintingOverlay />
       <UploadingOverlay />
-      {/* Top Bar - positioned at top left */}
-      {/* Note: pointer-events-auto is needed because tldraw's InFrontOfTheCanvas has pointer-events: none */}
+      {/* Top Bar — pointer-events-auto needed because tldraw's InFrontOfTheCanvas has pointer-events: none */}
       <div className="pointer-events-auto fixed left-4 top-4 z-[300] flex items-center gap-2">
         <Button
           asChild
