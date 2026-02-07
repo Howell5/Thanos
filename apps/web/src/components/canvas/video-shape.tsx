@@ -1,4 +1,12 @@
-import { BaseBoxShapeUtil, HTMLContainer, type RecordProps, T, type TLShape } from "tldraw";
+import {
+  BaseBoxShapeUtil,
+  HTMLContainer,
+  type RecordProps,
+  T,
+  type TLShape,
+  useEditor,
+  useValue,
+} from "tldraw";
 
 // Shape type constant
 export const VIDEO_SHAPE_TYPE = "canvas-video" as const;
@@ -33,6 +41,8 @@ function VideoPlayer({ src }: { src: string }) {
 
 function VideoComponent({ shape }: { shape: IVideoShape }) {
   const { w, h, videoUrl, fileName } = shape.props;
+  const editor = useEditor();
+  const isEditing = useValue("isEditing", () => editor.getEditingShapeId() === shape.id, [editor, shape.id]);
 
   return (
     <HTMLContainer>
@@ -47,6 +57,7 @@ function VideoComponent({ shape }: { shape: IVideoShape }) {
           alignItems: "center",
           justifyContent: "center",
           position: "relative",
+          pointerEvents: isEditing ? "all" : undefined,
         }}
       >
         {videoUrl ? (
@@ -103,7 +114,7 @@ export class VideoShapeUtil extends BaseBoxShapeUtil<IVideoShape> {
   }
 
   override canEdit() {
-    return false;
+    return true;
   }
   override canResize() {
     return true;
