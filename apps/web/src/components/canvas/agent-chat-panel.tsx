@@ -1,232 +1,15 @@
 import { Button } from "@/components/ui/button";
-import { requestCanvasAddVideo } from "@/lib/canvas-events";
-import type { ChatMessage } from "@/stores/use-agent-store";
+import { coalesceMessages } from "@/lib/agent-turns";
 import { selectCanStart, selectIsRunning, useAgentStore } from "@/stores/use-agent-store";
-import { ChevronRight, Film, Loader2, Play, RotateCcw, Send, Square, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronRight, Play, RotateCcw, Send, Square, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { TurnView } from "./agent-turn-segments";
 
 // ─── Props ──────────────────────────────────────────────────
 
 interface AgentChatPanelProps {
   open: boolean;
   onClose: () => void;
-}
-
-// ─── Message Components ─────────────────────────────────────
-
-function TextMessage({ content, finalized }: { content: string; finalized: boolean }) {
-  return (
-    <div className="mx-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600">
-        {!finalized && <Loader2 className="h-3 w-3 animate-spin" />}
-        Thinking
-      </div>
-      <div className="max-h-[200px] overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-600">
-        {content}
-      </div>
-    </div>
-  );
-}
-
-/** Try to extract a video URL from tool output JSON */
-function extractVideoUrl(output: string | undefined): string | null {
-  if (!output) return null;
-  try {
-    const data = JSON.parse(output);
-    if (data.outputUrl && typeof data.outputUrl === "string" && data.outputUrl.endsWith(".mp4")) {
-      return data.outputUrl;
-    }
-  } catch {
-    // Not JSON, try regex
-    const match = output.match(/https?:\/\/[^\s"]+\.mp4/);
-    if (match) return match[0];
-  }
-  return null;
-}
-
-function VideoResultCard({ url }: { url: string }) {
-  const [added, setAdded] = useState(false);
-
-  const addToCanvas = useCallback(() => {
-    requestCanvasAddVideo(url, "Rendered Video");
-    setAdded(true);
-  }, [url]);
-
-  return (
-    <div className="mx-3 overflow-hidden rounded-lg border border-emerald-200 bg-emerald-50">
-      <div className="aspect-video w-full bg-black">
-        {/* biome-ignore lint/a11y/useMediaCaption: agent-rendered video */}
-        <video src={url} controls preload="metadata" className="h-full w-full object-contain" />
-      </div>
-      <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-[11px] font-medium text-emerald-700">Video rendered</span>
-        <button
-          type="button"
-          onClick={addToCanvas}
-          disabled={added}
-          className="flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-emerald-700 disabled:bg-emerald-300"
-        >
-          <Film className="h-3 w-3" />
-          {added ? "Added" : "Add to Canvas"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ToolMessage({
-  tool,
-  input,
-  output,
-  completed,
-}: {
-  tool: string;
-  input: unknown;
-  output?: string;
-  completed: boolean;
-}) {
-  const inputPreview =
-    typeof input === "string" ? input.slice(0, 100) : (JSON.stringify(input)?.slice(0, 100) ?? "");
-
-  // Special rendering for AskUserQuestion
-  if (tool === "AskUserQuestion") {
-    return <AskUserQuestionMessage input={input} />;
-  }
-
-  // Detect video URL in tool output
-  const videoUrl = extractVideoUrl(output);
-
-  return (
-    <>
-      <div className="mx-3 flex items-start gap-2 py-1.5">
-        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center">
-          {completed ? (
-            <span className="text-xs text-green-500">✓</span>
-          ) : (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
-          )}
-        </span>
-        <div className="min-w-0 flex-1">
-          <span className="text-xs font-medium text-slate-700">{tool}</span>
-          {inputPreview && <p className="truncate text-[11px] text-slate-400">{inputPreview}</p>}
-          {output && !videoUrl && (
-            <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-400">
-              {output.length > 150 ? `${output.slice(0, 150)}...` : output}
-            </p>
-          )}
-        </div>
-      </div>
-      {videoUrl && <VideoResultCard url={videoUrl} />}
-    </>
-  );
-}
-
-function AskUserQuestionMessage({ input }: { input: unknown }) {
-  const data = input as {
-    questions?: Array<{
-      question: string;
-      options?: Array<{ label: string; description?: string }>;
-    }>;
-  };
-  const questions = data?.questions;
-
-  if (!Array.isArray(questions)) {
-    return (
-      <div className="mx-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-slate-600">
-        Agent is asking a question...
-      </div>
-    );
-  }
-
-  return (
-    <div className="mx-3 space-y-2">
-      {questions.map((q) => (
-        <div key={q.question} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-          <p className="mb-1.5 text-xs font-medium text-slate-700">{q.question}</p>
-          {q.options && (
-            <div className="space-y-1">
-              {q.options.map((opt) => (
-                <div key={opt.label} className="rounded border border-blue-100 bg-white px-2 py-1">
-                  <span className="text-[11px] font-medium text-slate-600">{opt.label}</span>
-                  {opt.description && (
-                    <p className="text-[10px] text-slate-400">{opt.description}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function UserMessage({ content }: { content: string }) {
-  return (
-    <div className="mx-3 flex justify-end">
-      <div className="max-w-[85%] rounded-lg bg-blue-500 px-3 py-2 text-xs text-white">
-        <div className="whitespace-pre-wrap break-words leading-relaxed">{content}</div>
-      </div>
-    </div>
-  );
-}
-
-function ErrorMessage({ message }: { message: string }) {
-  return (
-    <div className="mx-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
-      {message}
-    </div>
-  );
-}
-
-function ResultMessage({
-  cost,
-  inputTokens,
-  outputTokens,
-}: {
-  cost: number;
-  inputTokens: number;
-  outputTokens: number;
-}) {
-  return (
-    <div className="mx-3 flex items-center gap-3 border-t border-slate-100 pt-2 text-[11px] text-slate-500">
-      <span>${cost.toFixed(4)}</span>
-      <span>{inputTokens.toLocaleString()} in</span>
-      <span>{outputTokens.toLocaleString()} out</span>
-    </div>
-  );
-}
-
-// ─── Message Renderer ───────────────────────────────────────
-
-function MessageRenderer({ msg, toolCompleted }: { msg: ChatMessage; toolCompleted?: boolean }) {
-  switch (msg.type) {
-    case "text":
-      return <TextMessage content={msg.content} finalized={msg.finalized} />;
-    case "tool":
-      return (
-        <ToolMessage
-          tool={msg.tool}
-          input={msg.input}
-          output={msg.output}
-          completed={toolCompleted ?? true}
-        />
-      );
-    case "user":
-      return <UserMessage content={msg.content} />;
-    case "error":
-      return <ErrorMessage message={msg.message} />;
-    case "result":
-      return (
-        <ResultMessage
-          cost={msg.cost}
-          inputTokens={msg.inputTokens}
-          outputTokens={msg.outputTokens}
-        />
-      );
-    default:
-      return null;
-  }
 }
 
 // ─── Main Component ─────────────────────────────────────────
@@ -248,6 +31,9 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
   const reset = useAgentStore((s) => s.reset);
   const sessionId = useAgentStore((s) => s.sessionId);
   const hasSession = sessionId !== null;
+
+  // Coalesce messages into turns
+  const turns = useMemo(() => coalesceMessages(messages, status), [messages, status]);
 
   // Auto-scroll
   const msgCount = messages.length;
@@ -311,30 +97,23 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
         </button>
       </div>
 
-      {/* Message Feed */}
+      {/* Message Feed — now uses coalesced turns */}
       <div ref={feedRef} className="flex-1 space-y-2 overflow-y-auto py-3">
-        {messages.length === 0 && !isRunning && (
+        {turns.length === 0 && !isRunning && (
           <div className="flex h-full items-center justify-center text-xs text-slate-400">
             Enter a prompt to start
           </div>
         )}
 
-        {messages.map((msg, i) => {
-          // A tool is completed if anything comes after it, or agent is no longer running.
-          // Only the very last tool with no subsequent messages while running shows loading.
-          let toolCompleted: boolean | undefined;
-          if (msg.type === "tool") {
-            const hasSubsequentMessage = i < messages.length - 1;
-            toolCompleted = hasSubsequentMessage || !isRunning;
-          }
-          return (
-            <MessageRenderer key={`${msg.type}-${i}`} msg={msg} toolCompleted={toolCompleted} />
-          );
-        })}
+        {turns.map((turn) => (
+          <TurnView key={turn.turnId} turn={turn} />
+        ))}
 
-        {/* Show store error if not in messages */}
-        {status === "error" && error && messages.every((m) => m.type !== "error") && (
-          <ErrorMessage message={error} />
+        {/* Show store error if not captured in any turn */}
+        {status === "error" && error && turns.every((t) => !t.error) && (
+          <div className="mx-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+            {error}
+          </div>
         )}
       </div>
 

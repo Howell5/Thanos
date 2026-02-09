@@ -10,6 +10,7 @@ import {
 } from "tldraw";
 import "tldraw/tldraw.css";
 import { Button } from "@/components/ui/button";
+import { useAgentCanvasSync } from "@/hooks/use-agent-canvas-sync";
 import { useAgentRenderer } from "@/hooks/use-agent-renderer";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import {
@@ -32,15 +33,16 @@ import { ArrowLeft, Check, Loader2, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { AgentTurnShapeUtil } from "./agent-turn-shape";
 import { BottomPromptPanel } from "./bottom-prompt-panel";
-import { RichCardShapeUtil } from "./rich-card-shape";
-import { VIDEO_SHAPE_TYPE, VideoShapeUtil } from "./video-shape";
-
-const AUTO_SAVE_DELAY = 2000;
 import { FloatingToolbar } from "./floating-toolbar";
 import { GeneratingOverlay } from "./generating-overlay";
 import { InpaintingOverlay } from "./inpainting-overlay";
+import { RichCardShapeUtil } from "./rich-card-shape";
 import { UploadingOverlay } from "./uploading-overlay";
+import { VIDEO_SHAPE_TYPE, VideoShapeUtil } from "./video-shape";
+
+const AUTO_SAVE_DELAY = 2000;
 
 interface TldrawCanvasProps {
   projectId: string;
@@ -69,18 +71,18 @@ function CanvasEventHandler() {
   // Add keyboard shortcuts
   useKeyboardShortcuts(editor);
 
-  // Connect agent renderer to canvas
+  // Connect agent renderer to canvas (for artifact placement)
   useAgentRenderer(editor);
 
-  // Listen for shape deletions to cancel upload tasks
+  // Sync agent turns to canvas shapes
+  useAgentCanvasSync(editor);
+
   useEffect(() => {
-    const unsubscribe = editor.store.listen(
+    return editor.store.listen(
       (entry) => {
-        // Check for deleted shapes
         for (const record of Object.values(entry.changes.removed)) {
           if (record.typeName === "shape" && "meta" in record) {
             const meta = record.meta as unknown as ImageMeta;
-            // If it was an uploading shape, cancel the upload task
             if (meta?.source === "uploading" && meta.uploadTaskId) {
               cancelUpload(meta.uploadTaskId);
             }
@@ -89,10 +91,6 @@ function CanvasEventHandler() {
       },
       { source: "user", scope: "document" },
     );
-
-    return () => {
-      unsubscribe();
-    };
   }, [editor, cancelUpload]);
 
   // Listen for video add requests from outside tldraw (e.g. AgentChatPanel)
@@ -484,7 +482,7 @@ export function TldrawCanvas({
   return (
     <div className="relative h-full w-full" onDropCapture={handleDropCapture}>
       <Tldraw
-        shapeUtils={[RichCardShapeUtil, VideoShapeUtil]}
+        shapeUtils={[RichCardShapeUtil, VideoShapeUtil, AgentTurnShapeUtil]}
         assets={assetStore}
         components={{
           InFrontOfTheCanvas: InFrontOfTheCanvas,
