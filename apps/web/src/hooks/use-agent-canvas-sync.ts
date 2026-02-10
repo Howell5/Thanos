@@ -1,4 +1,5 @@
 import { AGENT_TURN_SHAPE_TYPE } from "@/components/canvas/agent-turn-shape";
+import type { AgentTurn } from "@/lib/agent-turns";
 import { coalesceMessages } from "@/lib/agent-turns";
 import { findNonOverlappingPosition } from "@/lib/canvas-position";
 import { useAgentStore } from "@/stores/use-agent-store";
@@ -11,43 +12,47 @@ const SHAPE_DEFAULT_HEIGHT = 60;
 const THROTTLE_MS = 100;
 
 /**
- * Sync agent turns from the store onto the tldraw canvas as shapes.
+ * Rebuild turnId → shapeId mapping from shapes already on the canvas.
+ * Called once on init and after reset to stay in sync with persisted canvas.
+ */
+function rebuildMapFromCanvas(editor: Editor, turnMap: Map<string, TLShapeId>) {
+  turnMap.clear();
+  for (const shape of editor.getCurrentPageShapes()) {
+    if (shape.type === AGENT_TURN_SHAPE_TYPE) {
+      const turnId = (shape.props as { turnId?: string }).turnId;
+      if (turnId) {
+        turnMap.set(turnId, shape.id);
+      }
+    }
+  }
+}
+
+/**
+ * Sync agent turns from the Zustand store onto the tldraw canvas as shapes.
  *
- * - Creates one shape per AgentTurn
- * - Updates existing shapes when content changes (streaming)
- * - Throttles updates during streaming to ~10fps
- * - Rebuilds mapping table from existing shapes on mount (page reload)
+ * Key invariant: a turn shape is only created if its turnId is NOT already
+ * in the mapping. The mapping is rebuilt from canvas shapes on init, so
+ * rehydrated history (already persisted in canvas snapshot) is never duplicated.
  */
 export function useAgentCanvasSync(editor: Editor | null) {
   const turnMapRef = useRef<Map<string, TLShapeId>>(new Map());
   const lastUpdateRef = useRef(0);
   const rafRef = useRef<number>(0);
-  const initRef = useRef(false);
+  const prevTurnsRef = useRef<AgentTurn[]>([]);
 
-  // Rebuild mapping from existing shapes on mount
-  useEffect(() => {
-    if (!editor || initRef.current) return;
-    initRef.current = true;
-
-    const existingShapes = editor.getCurrentPageShapes();
-    for (const shape of existingShapes) {
-      if (shape.type === AGENT_TURN_SHAPE_TYPE) {
-        const turnId = (shape.props as { turnId?: string }).turnId;
-        if (turnId) {
-          turnMapRef.current.set(turnId, shape.id);
-        }
-      }
-    }
-  }, [editor]);
-
-  // Subscribe to store changes and sync shapes
   useEffect(() => {
     if (!editor) return;
 
+    const turnMap = turnMapRef.current;
+
+    // Rebuild from canvas once on mount
+    rebuildMapFromCanvas(editor, turnMap);
+
     const syncToCanvas = () => {
       const { messages, status } = useAgentStore.getState();
+      if (messages.length === 0) return;
+
       const turns = coalesceMessages(messages, status);
-      const turnMap = turnMapRef.current;
       const isStreaming = status === "running";
 
       // Throttle during streaming
@@ -76,24 +81,18 @@ export function useAgentCanvasSync(editor: Editor | null) {
         };
 
         if (existingId) {
-          // Update existing shape
-          const existing = editor.getShape(existingId);
-          if (!existing) {
-            // Shape was deleted from canvas — remove from map
+          // Update existing shape (skip if user deleted it from canvas)
+          if (!editor.getShape(existingId)) {
             turnMap.delete(turn.turnId);
             continue;
           }
-          editor.updateShape({
-            id: existingId,
-            type: AGENT_TURN_SHAPE_TYPE,
-            props,
-          });
+          editor.updateShape({ id: existingId, type: AGENT_TURN_SHAPE_TYPE, props });
         } else {
-          // Create new shape — find position below last turn shape
-          const prevTurnIds = [...turnMap.values()];
+          // New turn — create shape
+          const prevShapeIds = [...turnMap.values()];
           const position = findNonOverlappingPosition(
             editor,
-            prevTurnIds,
+            prevShapeIds,
             SHAPE_WIDTH,
             SHAPE_DEFAULT_HEIGHT,
             { gap: 16 },
@@ -105,38 +104,34 @@ export function useAgentCanvasSync(editor: Editor | null) {
             type: AGENT_TURN_SHAPE_TYPE,
             x: position.x,
             y: position.y,
-            props: {
-              ...props,
-              h: SHAPE_DEFAULT_HEIGHT,
-            },
+            props: { ...props, h: SHAPE_DEFAULT_HEIGHT },
           });
           turnMap.set(turn.turnId, shapeId);
         }
       }
+
+      prevTurnsRef.current = turns;
     };
 
-    // Subscribe to store changes
-    const unsubscribe = useAgentStore.subscribe(syncToCanvas);
+    const unsubscribe = useAgentStore.subscribe((state, prevState) => {
+      // Only sync when messages or status actually changed
+      if (state.messages === prevState.messages && state.status === prevState.status) return;
 
-    // Initial sync
-    syncToCanvas();
+      // Detect session reset → rebuild map from (now-empty) canvas
+      if (prevState.messages.length > 0 && state.messages.length <= 1 && state.status === "running") {
+        rebuildMapFromCanvas(editor, turnMap);
+      }
+
+      syncToCanvas();
+    });
+
+    // Do NOT call syncToCanvas() here on mount.
+    // Rehydrated messages already have their shapes persisted in the canvas snapshot.
+    // Shapes will be synced naturally when the next store change fires.
 
     return () => {
       unsubscribe();
       cancelAnimationFrame(rafRef.current);
     };
   }, [editor]);
-
-  // Reset mapping when agent session resets
-  useEffect(() => {
-    const unsubscribe = useAgentStore.subscribe(
-      (state, prevState) => {
-        // Detect reset: messages went from non-empty to empty (or single user message from fresh send)
-        if (prevState.messages.length > 0 && state.messages.length <= 1 && state.status === "running") {
-          turnMapRef.current.clear();
-        }
-      },
-    );
-    return unsubscribe;
-  }, []);
 }

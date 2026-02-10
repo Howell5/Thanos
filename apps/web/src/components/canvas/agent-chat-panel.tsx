@@ -128,7 +128,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
           }
           disabled={isRunning}
           rows={3}
-          className="mb-2 w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:border-blue-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+          className="mb-2 w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
         />
         <div className="flex items-center justify-between">
           <span className="truncate text-[10px] text-gray-400">~/workspaces/test-project</span>
