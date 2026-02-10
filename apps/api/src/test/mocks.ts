@@ -10,7 +10,12 @@ import type {
   InpaintImageParams,
 } from "../lib/gemini-ai";
 import type { PresignedUploadResult, UploadOptions, UploadResult } from "../lib/r2";
-import type { IGeminiAIService, IR2Service } from "../services/types";
+import type {
+  IGeminiAIService,
+  IR2Service,
+  ITTSService,
+  IVideoRenderService,
+} from "../services/types";
 
 /**
  * Mock Gemini AI Service
@@ -225,14 +230,143 @@ export class MockR2Service implements IR2Service {
 }
 
 /**
+ * Mock TTS Service
+ * Simulates text-to-speech synthesis without making actual API calls
+ */
+export class MockTTSService implements ITTSService {
+  private _isConfigured = true;
+  private _shouldFail = false;
+  private _failMessage = "Mock TTS synthesis failed";
+  private _synthesizeCalls: { text: string; voiceId?: string; speed?: number }[] = [];
+
+  async synthesize(text: string, voiceId?: string, speed?: number): Promise<string> {
+    this._synthesizeCalls.push({ text, voiceId, speed });
+
+    if (this._shouldFail) {
+      throw new Error(this._failMessage);
+    }
+
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8);
+    return `https://img.thanos.art/tts/${timestamp}-${random}.mp3`;
+  }
+
+  async batchSynthesize(
+    segments: { text: string; voiceId?: string; speed?: number }[],
+  ): Promise<string[]> {
+    return Promise.all(segments.map((s) => this.synthesize(s.text, s.voiceId, s.speed)));
+  }
+
+  isConfigured(): boolean {
+    return this._isConfigured;
+  }
+
+  // Test helpers
+  setConfigured(configured: boolean): void {
+    this._isConfigured = configured;
+  }
+
+  setFailure(shouldFail: boolean, message?: string): void {
+    this._shouldFail = shouldFail;
+    if (message) {
+      this._failMessage = message;
+    }
+  }
+
+  getSynthesizeCalls(): { text: string; voiceId?: string; speed?: number }[] {
+    return this._synthesizeCalls;
+  }
+
+  reset(): void {
+    this._isConfigured = true;
+    this._shouldFail = false;
+    this._failMessage = "Mock TTS synthesis failed";
+    this._synthesizeCalls = [];
+  }
+}
+
+/**
+ * Mock Video Render Service
+ * Simulates video rendering without actual Remotion or R2 calls
+ */
+export class MockVideoRenderService implements IVideoRenderService {
+  private _isConfigured = true;
+  private _shouldFail = false;
+  private _failMessage = "Mock render failed";
+  private _startRenderCalls: string[] = [];
+  private _progressMap = new Map<string, { progress: number; status: string }>();
+
+  async startRender(planId: string): Promise<{ renderId: string }> {
+    this._startRenderCalls.push(planId);
+
+    if (this._shouldFail) {
+      throw new Error(this._failMessage);
+    }
+
+    const renderId = crypto.randomUUID();
+    this._progressMap.set(renderId, { progress: 1, status: "done" });
+    return { renderId };
+  }
+
+  async getRenderProgress(renderId: string): Promise<{ progress: number; status: string }> {
+    const progress = this._progressMap.get(renderId);
+    if (!progress) {
+      return { progress: 0, status: "not_found" };
+    }
+    return progress;
+  }
+
+  async renderAndWait(
+    _planId: string,
+  ): Promise<{ status: "done" | "failed"; outputUrl?: string; error?: string }> {
+    if (this._shouldFail) {
+      return { status: "failed", error: this._failMessage };
+    }
+    return { status: "done", outputUrl: "https://img.thanos.art/mock-render-output.mp4" };
+  }
+
+  isConfigured(): boolean {
+    return this._isConfigured;
+  }
+
+  // Test helpers
+  setConfigured(configured: boolean): void {
+    this._isConfigured = configured;
+  }
+
+  setFailure(shouldFail: boolean, message?: string): void {
+    this._shouldFail = shouldFail;
+    if (message) {
+      this._failMessage = message;
+    }
+  }
+
+  getStartRenderCalls(): string[] {
+    return this._startRenderCalls;
+  }
+
+  reset(): void {
+    this._isConfigured = true;
+    this._shouldFail = false;
+    this._failMessage = "Mock render failed";
+    this._startRenderCalls = [];
+    this._progressMap.clear();
+  }
+}
+
+/**
  * Create fresh mock services for a test
  */
 export function createMockServices(): {
   geminiService: MockGeminiAIService;
   r2Service: MockR2Service;
+  ttsService: MockTTSService;
+  videoRenderService: MockVideoRenderService;
 } {
   return {
     geminiService: new MockGeminiAIService(),
     r2Service: new MockR2Service(),
+    ttsService: new MockTTSService(),
+    videoRenderService: new MockVideoRenderService(),
   };
 }

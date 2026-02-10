@@ -9,9 +9,9 @@ import { z } from "zod";
 import { db } from "../../db";
 import { videos } from "../../db/schema";
 import { type ClipWithVideo, searchClipsWithLLM } from "../../services/clip-search.service";
-import { triggerVideoAnalysis } from "../../services/video-analysis.service";
+import { analyzeVideoAndWait } from "../../services/video-analysis.service";
 import { createEditingPlanTool } from "./editing-plan-tool";
-import { createCheckRenderStatusTool, createRenderVideoTool } from "./render-video-tool";
+import { createRenderVideoTool } from "./render-video-tool";
 import { syncCanvasVideosToDb } from "./sync-canvas-videos";
 
 /**
@@ -324,13 +324,10 @@ export function createVideoToolsServer(projectId: string, userId: string) {
       // Tool 5: Render video from editing plan
       createRenderVideoTool(projectId),
 
-      // Tool 6: Check render progress
-      createCheckRenderStatusTool(),
-
-      // Tool 7: Trigger video re-analysis
+      // Tool 6: Trigger video re-analysis
       tool(
         "analyze_video",
-        "Trigger (re)analysis of a video with an optional custom prompt. Use this when the user wants to find specific types of clips.",
+        "Analyze a video with AI to extract clip segments. Blocks until analysis is complete. Use this when the user wants to find specific types of clips.",
         {
           videoId: z.string().uuid().describe("The ID of the video to analyze"),
           analysisRequest: z
@@ -368,27 +365,29 @@ export function createVideoToolsServer(projectId: string, userId: string) {
               };
             }
 
-            // Trigger analysis in background
-            triggerVideoAnalysis(args.videoId, args.analysisRequest);
+            // Await analysis completion
+            const result = await analyzeVideoAndWait(args.videoId, args.analysisRequest);
 
             return {
               content: [
                 {
                   type: "text" as const,
                   text: JSON.stringify({
-                    message: "Analysis started",
                     videoId: args.videoId,
-                    analysisRequest: args.analysisRequest || "Using default analysis prompt",
+                    status: result.status,
+                    clipCount: result.clipCount,
+                    ...(result.error ? { error: result.error } : {}),
                   }),
                 },
               ],
+              ...(result.status === "failed" ? { isError: true } : {}),
             };
           } catch (error) {
             return {
               content: [
                 {
                   type: "text" as const,
-                  text: `Error triggering analysis: ${error instanceof Error ? error.message : String(error)}`,
+                  text: `Error analyzing video: ${error instanceof Error ? error.message : String(error)}`,
                 },
               ],
               isError: true,
@@ -407,6 +406,5 @@ export const VIDEO_TOOL_NAMES = [
   "mcp__video-tools__get_video_clips",
   "mcp__video-tools__create_editing_plan",
   "mcp__video-tools__render_video",
-  "mcp__video-tools__check_render_status",
   "mcp__video-tools__analyze_video",
 ];

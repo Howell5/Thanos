@@ -83,6 +83,30 @@ export function triggerVideoAnalysis(videoId: string, analysisRequest?: string):
 }
 
 /**
+ * Run video analysis and wait for completion.
+ * Returns the analysis result (clip count, status, error).
+ */
+export async function analyzeVideoAndWait(
+  videoId: string,
+  analysisRequest?: string,
+): Promise<{ status: "done" | "failed"; clipCount: number; error?: string }> {
+  try {
+    await analyzeVideoBackground(videoId, analysisRequest);
+    const video = await db.query.videos.findFirst({
+      where: eq(videos.id, videoId),
+      with: { clips: true },
+    });
+    return { status: "done", clipCount: video?.clips.length ?? 0 };
+  } catch (error) {
+    return {
+      status: "failed",
+      clipCount: 0,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
  * Background video analysis task
  * Updates status in DB as it progresses
  */

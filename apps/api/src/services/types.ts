@@ -40,11 +40,45 @@ export interface IR2Service {
 }
 
 /**
+ * TTS (Text-to-Speech) Service Interface
+ */
+export interface ITTSService {
+  /** Synthesize text to speech, upload to R2, return CDN URL */
+  synthesize(text: string, voiceId?: string, speed?: number): Promise<string>;
+  /** Batch synthesize multiple texts in parallel, return CDN URLs */
+  batchSynthesize(
+    segments: { text: string; voiceId?: string; speed?: number }[],
+  ): Promise<string[]>;
+  /** Check if TTS service is configured */
+  isConfigured(): boolean;
+}
+
+/**
+ * Video Render Service Interface
+ */
+export interface IVideoRenderService {
+  /** Start rendering an editing plan into a video */
+  startRender(planId: string): Promise<{ renderId: string }>;
+  /** Get render progress */
+  getRenderProgress(renderId: string): Promise<{ progress: number; status: string }>;
+  /** Render and wait for completion, returning the final result */
+  renderAndWait(planId: string): Promise<{
+    status: "done" | "failed";
+    outputUrl?: string;
+    error?: string;
+  }>;
+  /** Check if render service is configured */
+  isConfigured(): boolean;
+}
+
+/**
  * Service context type for Hono c.var
  */
 export interface ServiceContext {
   geminiService: IGeminiAIService;
   r2Service: IR2Service;
+  ttsService: ITTSService;
+  videoRenderService: IVideoRenderService;
 }
 
 /**
