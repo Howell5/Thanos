@@ -29,6 +29,9 @@ const envSchema = z.object({
   R2_SECRET_ACCESS_KEY: z.string().optional(),
   R2_BUCKET: z.string().default("thanos-medias"),
   R2_CDN_DOMAIN: z.string().default("img.thanos.art"),
+  // Volcengine TTS configuration
+  VOLCENGINE_TTS_APP_ID: z.string().optional(),
+  VOLCENGINE_TTS_ACCESS_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

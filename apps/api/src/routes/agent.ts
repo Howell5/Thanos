@@ -4,6 +4,8 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { VIDEO_TOOL_NAMES, createVideoToolsServer } from "../agent/tools/video-tools";
+import { getSessionOrMock } from "../lib/mock-session";
+import { errors } from "../lib/response";
 
 // Request schema
 const runAgentSchema = z.object({
@@ -36,7 +38,13 @@ type AgentMessage =
   | { type: "error"; message: string };
 
 const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), async (c) => {
+  const session = await getSessionOrMock(c);
+  if (!session) {
+    return errors.unauthorized(c);
+  }
+
   const { prompt, workspacePath, sessionId, projectId } = c.req.valid("json");
+  const userId = session.user.id;
 
   return streamSSE(c, async (stream) => {
     // Per-request state for message transformation
@@ -51,7 +59,7 @@ const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), a
       const allowedTools: string[] = [];
 
       if (projectId) {
-        mcpServers["video-tools"] = createVideoToolsServer(projectId);
+        mcpServers["video-tools"] = createVideoToolsServer(projectId, userId);
         allowedTools.push(...VIDEO_TOOL_NAMES);
       }
 

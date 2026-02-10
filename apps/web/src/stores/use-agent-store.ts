@@ -22,19 +22,31 @@ export type ChatMessage =
   | { type: "result"; cost: number; inputTokens: number; outputTokens: number };
 
 /**
+ * Per-project chat session data
+ */
+interface ProjectSession {
+  sessionId: string | null;
+  messages: ChatMessage[];
+  status: AgentStatus;
+  error: string | null;
+}
+
+/**
  * Agent store state
  */
 interface AgentState {
+  /** Current active project chat data (derived from sessions map) */
   status: AgentStatus;
   sessionId: string | null;
   error: string | null;
-
-  /** Chat message list — finalized snapshots + one possible streaming message at the end */
   messages: ChatMessage[];
 
   /** Configuration */
   workspacePath: string;
-  projectId: string | null; // For video tools access
+  projectId: string | null;
+
+  /** Per-project session storage */
+  sessions: Record<string, ProjectSession>;
 
   /** Internal abort function */
   _abortFn: (() => void) | null;
@@ -45,9 +57,43 @@ interface AgentState {
   sendMessage: (prompt: string) => void;
   stop: () => void;
   reset: () => void;
+  restoreSession: (
+    projectId: string,
+    data: { sessionId: string | null; messages: ChatMessage[]; status: AgentStatus },
+  ) => void;
 }
 
 const DEFAULT_WORKSPACE_PATH = "/Users/willhong/Code/Work/Thanos/workspaces/test-project";
+
+const EMPTY_SESSION: ProjectSession = {
+  sessionId: null,
+  messages: [],
+  status: "idle",
+  error: null,
+};
+
+/**
+ * Save current active state back into sessions map
+ */
+function saveCurrentSession(state: AgentState): Record<string, ProjectSession> {
+  if (!state.projectId) return state.sessions;
+  return {
+    ...state.sessions,
+    [state.projectId]: {
+      sessionId: state.sessionId,
+      messages: state.messages,
+      status: state.status === "running" ? "error" : state.status,
+      error: state.error,
+    },
+  };
+}
+
+/**
+ * Load session data for a project from sessions map
+ */
+function loadSession(sessions: Record<string, ProjectSession>, projectId: string): ProjectSession {
+  return sessions[projectId] ?? EMPTY_SESSION;
+}
 
 // ─── Store ──────────────────────────────────────────────────
 
@@ -60,10 +106,36 @@ export const useAgentStore = create<AgentState>()(
       messages: [],
       workspacePath: DEFAULT_WORKSPACE_PATH,
       projectId: null,
+      sessions: {},
       _abortFn: null,
 
       setWorkspacePath: (path: string) => set({ workspacePath: path }),
-      setProjectId: (id: string | null) => set({ projectId: id }),
+
+      setProjectId: (id: string | null) => {
+        const state = get();
+
+        // Same project, no-op
+        if (state.projectId === id) return;
+
+        // Stop any running agent
+        state._abortFn?.();
+
+        // Save current project's session
+        const updatedSessions = saveCurrentSession(state);
+
+        // Load target project's session
+        const target = id ? loadSession(updatedSessions, id) : EMPTY_SESSION;
+
+        set({
+          projectId: id,
+          sessions: updatedSessions,
+          sessionId: target.sessionId,
+          messages: target.messages,
+          status: target.status,
+          error: target.error,
+          _abortFn: null,
+        });
+      },
 
       sendMessage: (prompt: string) => {
         const { workspacePath, sessionId, projectId, _abortFn } = get();
@@ -109,25 +181,66 @@ export const useAgentStore = create<AgentState>()(
       },
 
       reset: () => {
-        get()._abortFn?.();
-        set({
+        const state = get();
+        state._abortFn?.();
+
+        const newState: Partial<AgentState> = {
           status: "idle",
           sessionId: null,
           error: null,
           messages: [],
           _abortFn: null,
+        };
+
+        // Also clear this project's persisted session
+        if (state.projectId) {
+          const { [state.projectId]: _, ...rest } = state.sessions;
+          newState.sessions = rest;
+        }
+
+        set(newState);
+      },
+
+      restoreSession: (projectId, data) => {
+        const state = get();
+        // Only restore if this project is active and local messages are empty
+        if (state.projectId !== projectId || state.messages.length > 0) return;
+
+        const session: ProjectSession = {
+          sessionId: data.sessionId,
+          messages: data.messages,
+          status: data.status,
+          error: null,
+        };
+
+        set({
+          sessionId: session.sessionId,
+          messages: session.messages,
+          status: session.status,
+          error: null,
+          sessions: { ...state.sessions, [projectId]: session },
         });
       },
     }),
     {
       name: "agent-chat",
       partialize: (state) => ({
-        sessionId: state.sessionId,
-        messages: state.messages,
-        status: state.status === "running" ? ("error" as const) : state.status,
-        error: state.error,
+        // Persist the sessions map (merge current active state first)
+        sessions: saveCurrentSession(state),
         workspacePath: state.workspacePath,
+        projectId: state.projectId,
       }),
+      // On rehydrate, restore active project's session from the map
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        if (state.projectId && state.sessions[state.projectId]) {
+          const session = state.sessions[state.projectId];
+          state.sessionId = session.sessionId;
+          state.messages = session.messages;
+          state.status = session.status;
+          state.error = session.error;
+        }
+      },
     },
   ),
 );

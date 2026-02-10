@@ -44,6 +44,7 @@ import { servicesMiddleware } from "./middleware/services";
 import agentRoute from "./routes/agent";
 import aiImagesRoute from "./routes/ai-images/index";
 import checkoutRoute from "./routes/checkout";
+import editingPlansRoute from "./routes/editing-plans/index";
 import ordersRoute from "./routes/orders";
 import postsRoute from "./routes/posts";
 import projectsRoute from "./routes/projects";
@@ -153,6 +154,7 @@ const app = baseApp
   .route("/api/webhooks", webhooksRoute)
   .route("/api/user", userRoute)
   .route("/api/videos", videosRoute)
+  .route("/api/editing-plans", editingPlansRoute)
   .route("/api/agent", agentRoute);
 
 /**

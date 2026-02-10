@@ -23,6 +23,7 @@ export const updateProjectSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(500).optional(),
   canvasData: z.any().optional(), // tldraw TLRecord[] - any JSON data
+  chatMessages: z.any().optional(), // Agent chat session data
   thumbnail: z.string().url().optional(),
   isPublic: z.boolean().optional(),
 });

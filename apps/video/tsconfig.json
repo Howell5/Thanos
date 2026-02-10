@@ -2,20 +2,16 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "moduleResolution": "Bundler",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "outDir": "./dist",
+    "jsx": "react-jsx",
     "paths": {
-      "@repo/shared": ["../../packages/shared/src/index.ts"],
-      "@repo/video": ["../video/src/index.ts"],
-      "@repo/video/*": ["../video/src/lib/*"]
+      "@repo/shared": ["../../packages/shared/src/index.ts"]
     }
   },
   "include": ["src/**/*"],

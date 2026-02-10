@@ -116,7 +116,7 @@ function InFrontOfTheCanvas() {
   return (
     <>
       <FloatingToolbar />
-      <BottomPromptPanel />
+      {/* <BottomPromptPanel /> */}
       <GeneratingOverlay />
       <InpaintingOverlay />
       <UploadingOverlay />

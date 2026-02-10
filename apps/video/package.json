@@ -1,0 +1,33 @@
+{
+  "name": "@repo/video",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./plan-to-props": "./src/lib/plan-to-props.ts",
+    "./frame-utils": "./src/lib/frame-utils.ts",
+    "./schema": "./src/lib/schema.ts"
+  },
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render",
+    "build": "tsc --noEmit",
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "@remotion/cli": "latest",
+    "@remotion/renderer": "latest",
+    "remotion": "latest",
+    "@repo/shared": "workspace:*",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@remotion/eslint-plugin": "latest",
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.2"
+  }
+}

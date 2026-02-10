@@ -22,11 +22,38 @@ export function CanvasPage() {
     }
   }, [agentStatus]);
 
-  // Save canvas data (document + session)
+  // Restore chat messages from DB when project loads
+  useEffect(() => {
+    if (!project?.chatMessages || !project.id) return;
+    const data = project.chatMessages as {
+      sessionId: string | null;
+      messages: Array<unknown>;
+      status: string;
+    };
+    if (!data.messages?.length) return;
+    useAgentStore.getState().restoreSession(project.id, {
+      sessionId: data.sessionId,
+      messages: data.messages as import("@/stores/use-agent-store").ChatMessage[],
+      status: data.status as import("@/stores/use-agent-store").AgentStatus,
+    });
+  }, [project?.chatMessages, project?.id]);
+
+  // Save canvas data (document + session) along with chat messages
   const handleSave = useCallback(
     async (data: { document: unknown; session: unknown }) => {
+      const agentState = useAgentStore.getState();
+      const chatMessages =
+        agentState.messages.length > 0
+          ? {
+              sessionId: agentState.sessionId,
+              messages: agentState.messages,
+              status: agentState.status === "running" ? "idle" : agentState.status,
+            }
+          : undefined;
+
       await updateProject.mutateAsync({
         canvasData: data,
+        chatMessages,
       });
     },
     [updateProject],

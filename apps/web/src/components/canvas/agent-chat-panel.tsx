@@ -187,7 +187,7 @@ export function AgentPanelToggle({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="pointer-events-auto fixed bottom-4 right-4 z-[300] flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-lg transition-colors hover:bg-gray-50"
+      className="pointer-events-auto fixed right-4 top-1/2 z-[300] flex -translate-y-1/2 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-lg transition-colors hover:bg-gray-50"
     >
       <div className={`h-2 w-2 rounded-full ${dotClass}`} />
       <span className="text-xs font-medium text-slate-600">Agent</span>

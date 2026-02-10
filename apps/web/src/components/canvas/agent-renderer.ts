@@ -2,12 +2,14 @@ import { findNonOverlappingPosition } from "@/lib/canvas-position";
 import type { Editor, TLShapeId } from "tldraw";
 import { AssetRecordType, createShapeId } from "tldraw";
 import { RICH_CARD_SHAPE_TYPE } from "./rich-card-shape";
+import { VIDEO_SHAPE_TYPE } from "./video-shape";
 
 /**
  * Artifact extracted from tool output via heuristic detection
  */
 export type Artifact =
   | { type: "image"; url: string; width?: number; height?: number }
+  | { type: "video"; url: string; fileName?: string }
   | { type: "table"; title?: string; headers: string[]; rows: string[][] }
   | { type: "text"; content: string; format?: "markdown" | "plain" }
   | { type: "file"; name: string; url: string; mimeType?: string }
@@ -56,6 +58,9 @@ export class AgentRenderer {
     if (artifact.type === "image") {
       return this.renderImageArtifact(artifact, index);
     }
+    if (artifact.type === "video") {
+      return this.renderVideoArtifact(artifact, index);
+    }
     return this.renderCardArtifact(artifact, index);
   }
 
@@ -94,6 +99,33 @@ export class AgentRenderer {
       x: position.x,
       y: position.y,
       props: { assetId, w, h },
+    });
+
+    this.artifactShapeIds.set(index, shapeId);
+    return shapeId;
+  }
+
+  private renderVideoArtifact(
+    artifact: Extract<Artifact, { type: "video" }>,
+    index: number,
+  ): TLShapeId {
+    const w = 480;
+    const h = 270;
+    const existingIds = [...this.artifactShapeIds.values()];
+    const position = findNonOverlappingPosition(this.editor, existingIds, w, h);
+
+    const shapeId = createShapeId();
+    this.editor.createShape({
+      id: shapeId,
+      type: VIDEO_SHAPE_TYPE,
+      x: position.x,
+      y: position.y,
+      props: {
+        w,
+        h,
+        videoUrl: artifact.url,
+        fileName: artifact.fileName || "Rendered Video",
+      },
     });
 
     this.artifactShapeIds.set(index, shapeId);
