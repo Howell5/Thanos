@@ -10,12 +10,15 @@ import { db } from "../../db";
 import { videos } from "../../db/schema";
 import { type ClipWithVideo, searchClipsWithLLM } from "../../services/clip-search.service";
 import { triggerVideoAnalysis } from "../../services/video-analysis.service";
+import { createEditingPlanTool } from "./editing-plan-tool";
+import { createCheckRenderStatusTool, createRenderVideoTool } from "./render-video-tool";
+import { syncCanvasVideosToDb } from "./sync-canvas-videos";
 
 /**
  * Create video tools MCP server for a specific project
  * Each agent session gets its own server instance scoped to a project
  */
-export function createVideoToolsServer(projectId: string) {
+export function createVideoToolsServer(projectId: string, userId: string) {
   return createSdkMcpServer({
     name: "video-tools",
     version: "1.0.0",
@@ -32,7 +35,7 @@ export function createVideoToolsServer(projectId: string) {
         },
         async (args) => {
           try {
-            const videoList = await db.query.videos.findMany({
+            let videoList = await db.query.videos.findMany({
               where:
                 args.status === "all"
                   ? eq(videos.projectId, projectId)
@@ -40,6 +43,27 @@ export function createVideoToolsServer(projectId: string) {
               with: { clips: true },
               orderBy: (videos, { desc }) => [desc(videos.createdAt)],
             });
+
+            // Auto-sync: if no DB records found, try to create them from canvas shapes
+            let syncInfo: string | undefined;
+            if (videoList.length === 0) {
+              const syncResult = await syncCanvasVideosToDb(projectId, userId);
+              if (syncResult.synced > 0) {
+                syncInfo = `Auto-synced ${syncResult.synced} video(s) from canvas (skipped: ${syncResult.skipped}, errors: ${syncResult.errors}). Analysis has been triggered.`;
+                // Re-query to include newly created records
+                videoList = await db.query.videos.findMany({
+                  where:
+                    args.status === "all"
+                      ? eq(videos.projectId, projectId)
+                      : and(
+                          eq(videos.projectId, projectId),
+                          eq(videos.analysisStatus, args.status),
+                        ),
+                  with: { clips: true },
+                  orderBy: (videos, { desc }) => [desc(videos.createdAt)],
+                });
+              }
+            }
 
             const summary = videoList.map((v) => ({
               videoId: v.id,
@@ -58,6 +82,7 @@ export function createVideoToolsServer(projectId: string) {
                     {
                       projectId,
                       totalVideos: summary.length,
+                      ...(syncInfo ? { syncInfo } : {}),
                       videos: summary,
                     },
                     null,
@@ -293,7 +318,16 @@ export function createVideoToolsServer(projectId: string) {
         },
       ),
 
-      // Tool 4: Trigger video re-analysis
+      // Tool 4: Create editing plan (imported from separate file)
+      createEditingPlanTool(projectId, userId),
+
+      // Tool 5: Render video from editing plan
+      createRenderVideoTool(projectId),
+
+      // Tool 6: Check render progress
+      createCheckRenderStatusTool(),
+
+      // Tool 7: Trigger video re-analysis
       tool(
         "analyze_video",
         "Trigger (re)analysis of a video with an optional custom prompt. Use this when the user wants to find specific types of clips.",
@@ -371,5 +405,8 @@ export const VIDEO_TOOL_NAMES = [
   "mcp__video-tools__list_project_videos",
   "mcp__video-tools__search_video_clips",
   "mcp__video-tools__get_video_clips",
+  "mcp__video-tools__create_editing_plan",
+  "mcp__video-tools__render_video",
+  "mcp__video-tools__check_render_status",
   "mcp__video-tools__analyze_video",
 ];
