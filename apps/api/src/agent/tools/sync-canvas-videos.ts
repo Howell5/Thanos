@@ -35,7 +35,13 @@ function extractVideoShapes(canvasData: unknown): CanvasVideoShape[] {
   if (!canvasData || typeof canvasData !== "object") return [];
 
   const shapes: CanvasVideoShape[] = [];
-  const store = (canvasData as Record<string, unknown>).store;
+  // tldraw canvas structure: { document: { store: { ... } } }
+  const document = (canvasData as Record<string, unknown>).document;
+  const store = (
+    document && typeof document === "object"
+      ? (document as Record<string, unknown>).store
+      : undefined
+  ) as Record<string, unknown> | undefined;
   if (!store || typeof store !== "object") return [];
 
   for (const value of Object.values(store as Record<string, unknown>)) {
