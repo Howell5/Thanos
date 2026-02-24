@@ -81,10 +81,12 @@ function stripBase64Prefix(base64: string): string {
  */
 function getGeminiClient(): GoogleGenAI {
   const env = validateEnv();
+  const project = env.GOOGLE_VERTEX_PROJECT || env.GOOGLE_CLOUD_PROJECT;
+  const location = env.GOOGLE_VERTEX_LOCATION || env.GOOGLE_CLOUD_LOCATION || "us-central1";
   return new GoogleGenAI({
     vertexai: true,
-    project: env.GOOGLE_VERTEX_PROJECT!,
-    location: env.GOOGLE_VERTEX_LOCATION,
+    project: project!,
+    location,
   });
 }
 
@@ -206,7 +208,16 @@ async function generateSingleImage(params: GenerateImageParams): Promise<Generat
     }
   }
 
-  throw new Error("No image generated in response");
+  // Log text parts returned by the model for debugging
+  const textParts = candidate.content.parts
+    .filter((p) => p.text)
+    .map((p) => p.text)
+    .join("\n");
+  if (textParts) {
+    console.warn("[Gemini] No image in response. Model returned text:", textParts);
+  }
+
+  throw new Error(`No image generated in response${textParts ? `: ${textParts}` : ""}`);
 }
 
 /**
@@ -397,5 +408,5 @@ export function estimateInpaintCredits(): number {
  */
 export function isGeminiConfigured(): boolean {
   const env = validateEnv();
-  return !!env.GOOGLE_VERTEX_PROJECT;
+  return !!(env.GOOGLE_VERTEX_PROJECT || env.GOOGLE_CLOUD_PROJECT);
 }

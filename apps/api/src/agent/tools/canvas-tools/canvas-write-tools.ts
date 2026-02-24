@@ -35,13 +35,13 @@ export function createCanvasToolsEmitter(): CanvasToolsEmitter {
 export function createAddShapeTool(emitter: CanvasToolsEmitter) {
   return tool(
     "add_shape",
-    `Add a new shape to the canvas. The shape will appear immediately on the user's canvas. Use this to present results, artifacts, and outputs visually.
+    `Add a new shape to the canvas. The shape will appear immediately on the user's canvas. Use this to organize information — adding labels, annotations, notes, or placing reference materials.
 
 IMPORTANT — readability & layout guidelines:
 - For text: ALWAYS set width explicitly — this controls how wide the text block renders. Use width 300–600 for body text so it wraps naturally; use a narrower width (150–250) for short labels or titles so they don't stretch across the canvas. Use fontSize 32–48 for titles/headings, 20–24 for body text. Match the width to the expected text length: a short title like "Hello" needs width ~150, a paragraph needs width ~500.
 - For images: set width/height proportionally so content is clearly visible (at least 300px on the short edge).
 - Consider the existing canvas layout: use list_shapes first to see what's already there and choose coordinates that don't overlap with existing shapes. Leave ~30px padding between shapes.
-- When placing multiple shapes (e.g. titles under images), align them deliberately — use consistent x values for columns and predictable y offsets so the result looks intentional, not scattered.`,
+- When placing multiple shapes (e.g. labels under images), align them deliberately — use consistent x values for columns and predictable y offsets so the result looks intentional, not scattered.`,
     {
       shapeType: z
         .enum(["text", "image", "video", "file", "audio"])
