@@ -1,6 +1,12 @@
+import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { zValidator } from "@hono/zod-validator";
-import type { CanvasShapeInstruction } from "@repo/shared";
+import type {
+  CanvasShapeInstruction,
+  MoveShapesPayload,
+  ResizeShapesPayload,
+  UpdateShapeMetaPayload,
+} from "@repo/shared";
 import { existsSync, mkdirSync } from "node:fs";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -10,6 +16,7 @@ import {
   createCanvasToolsEmitter,
   createCanvasToolsServer,
 } from "../agent/tools/canvas-tools";
+import { AgentLogger } from "../lib/agent-logger";
 import { getSessionOrMock } from "../lib/mock-session";
 import { errors } from "../lib/response";
 
@@ -34,18 +41,21 @@ function buildSystemPrompt(hasCanvasTools: boolean): string {
       ``,
       `### Read`,
       `- **list_shapes**: List all shapes on the canvas (images, videos, text, etc.) with position and dimensions.`,
-      `- **get_shape**: Get full details of a shape by ID. For images, returns the actual image content.`,
+      `- **get_shape**: Get full details of a shape by ID. For images, returns the actual image content AND the imageUrl. You can use imageUrl with add_shape to duplicate/copy images.`,
       ``,
       `### Write`,
-      `- **add_shape**: Add a text, image, video, file, or audio shape to the canvas.`,
+      `- **add_shape**: Add a text, image, video, file, or audio shape to the canvas. Accepts http(s) URLs or data: URIs.`,
+      `- **move_shapes**: Move one or more shapes. Use absolute (x, y) or relative (dx, dy) coordinates. Batch supported.`,
+      `- **resize_shapes**: Resize one or more shapes. Use absolute (width, height) or a scale factor. Batch supported.`,
+      `- **update_shape_meta**: Update the meta field (free-form key-value) of one or more shapes. Batch supported.`,
       ``,
       `### Video`,
-      `- **list_project_videos**: List all videos in the project with analysis status and clip counts.`,
-      `- **get_video_clips**: Get detailed clip breakdown for a specific video.`,
-      `- **search_video_clips**: Semantic search across all analyzed clips using natural language.`,
+      // `- **list_project_videos**: List all videos in the project with analysis status and clip counts.`,
+      // `- **get_video_clips**: Get detailed clip breakdown for a specific video.`,
+      // `- **search_video_clips**: Semantic search across all analyzed clips using natural language.`,
       `- **analyze_video**: Run AI analysis on a video to extract clip segments (blocks until done).`,
-      `- **create_editing_plan**: Assemble selected clips into an editing plan with voiceover, text overlays, transitions, and audio config.`,
-      `- **render_video**: Render a video from an editing plan (blocks until done, returns output URL).`,
+      // `- **create_editing_plan**: Assemble selected clips into an editing plan with voiceover, text overlays, transitions, and audio config.`,
+      // `- **render_video**: Render a video from an editing plan (blocks until done, returns output URL).`,
     );
   }
 
@@ -64,41 +74,99 @@ const runAgentSchema = z.object({
   prompt: z.string().min(1),
   workspacePath: z.string().min(1),
   sessionId: z.string().optional(),
-  projectId: z.string().uuid().optional().describe("Project ID for canvas tools access"),
+  projectId: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("Project ID for canvas tools access"),
   mentionedShapes: z.array(mentionedShapeSchema).optional(),
 });
 
 /**
- * Prepend shape context to the user prompt when shapes are mentioned via @.
- * For image shapes, instructs the agent to call get_shape to see the actual image.
+ * Fetch an image and return its base64 data + media type.
+ * Returns null if the fetch fails so we can gracefully skip broken images.
  */
-function buildPromptWithShapeContext(
+async function fetchImageAsBase64(
+  url: string,
+): Promise<{ data: string; mediaType: string } | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const mediaType = res.headers.get("content-type") || "image/png";
+    return { data: buf.toString("base64"), mediaType };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build a prompt with shape context. When image shapes have a thumbnailUrl,
+ * fetches the images and returns multimodal content blocks with base64 data
+ * so the model sees the image directly without an extra get_shape tool call.
+ */
+async function buildPromptWithShapeContext(
   prompt: string,
   shapes: z.infer<typeof mentionedShapeSchema>[],
-): string {
+): Promise<string | SDKUserMessage["message"]["content"]> {
   const contextLines: string[] = [];
-  const imageShapeIds: string[] = [];
+  const imageShapes: { id: string; url: string }[] = [];
 
   for (const s of shapes) {
     contextLines.push(`- ${s.id} (${s.type}): ${s.brief}`);
-    if (s.type === "image") {
-      imageShapeIds.push(s.id);
+    if (s.type === "image" && s.thumbnailUrl) {
+      imageShapes.push({ id: s.id, url: s.thumbnailUrl });
     }
   }
 
-  const parts = [
-    `The user is referring to these canvas shapes:`,
-    contextLines.join("\n"),
-  ];
-
-  if (imageShapeIds.length > 0) {
-    parts.push(
-      `\nIMPORTANT: The user mentioned ${imageShapeIds.length} image shape(s). You MUST call get_shape for each image shape to see the actual image content before responding. Shape IDs: ${imageShapeIds.join(", ")}`,
-    );
+  // No images with URLs — return plain text prompt
+  if (imageShapes.length === 0) {
+    return [
+      "The user is referring to these canvas shapes:",
+      contextLines.join("\n"),
+      "",
+      prompt,
+    ].join("\n");
   }
 
-  parts.push("", prompt);
-  return parts.join("\n");
+  // Fetch all images in parallel
+  const fetched = await Promise.all(
+    imageShapes.map(async (img) => ({
+      ...img,
+      image: await fetchImageAsBase64(img.url),
+    })),
+  );
+
+  // Build multimodal content blocks with inline base64 images
+  const content: SDKUserMessage["message"]["content"] = [
+    {
+      type: "text" as const,
+      text: [
+        "The user is referring to these canvas shapes:",
+        contextLines.join("\n"),
+      ].join("\n"),
+    },
+  ];
+
+  for (const img of fetched) {
+    if (img.image) {
+      content.push({
+        type: "image" as const,
+        source: {
+          type: "base64" as const,
+          media_type: img.image.mediaType,
+          data: img.image.data,
+        },
+      } as never);
+      content.push({
+        type: "text" as const,
+        text: `(Above image is shape ${img.id})`,
+      });
+    }
+  }
+
+  content.push({ type: "text" as const, text: prompt });
+  return content;
 }
 
 /**
@@ -122,118 +190,204 @@ type AgentMessage =
   | { type: "tool_use"; toolId: string; tool: string; input: unknown }
   | { type: "tool_result"; toolId: string; output: string }
   | { type: "canvas_add_shape"; instruction: CanvasShapeInstruction }
+  | { type: "canvas_move_shapes"; payload: MoveShapesPayload }
+  | { type: "canvas_resize_shapes"; payload: ResizeShapesPayload }
+  | { type: "canvas_update_shape_meta"; payload: UpdateShapeMetaPayload }
   | { type: "result"; cost: number; inputTokens: number; outputTokens: number }
   | { type: "error"; message: string };
 
-const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), async (c) => {
-  const session = await getSessionOrMock(c);
-  if (!session) {
-    return errors.unauthorized(c);
-  }
+const agentRoute = new Hono().post(
+  "/run",
+  zValidator("json", runAgentSchema),
+  async (c) => {
+    const session = await getSessionOrMock(c);
+    if (!session) {
+      return errors.unauthorized(c);
+    }
 
-  const { prompt: rawPrompt, workspacePath, sessionId, projectId, mentionedShapes } = c.req.valid("json");
-  const userId = session.user.id;
+    const {
+      prompt: rawPrompt,
+      workspacePath,
+      sessionId,
+      projectId,
+      mentionedShapes,
+    } = c.req.valid("json");
+    const userId = session.user.id;
 
-  // Build prompt — use multimodal content blocks when image shapes are mentioned
-  const prompt = mentionedShapes?.length
-    ? buildPromptWithShapeContext(rawPrompt, mentionedShapes)
-    : rawPrompt;
+    // Build prompt — embed image thumbnails as multimodal content blocks when available
+    const promptContent = mentionedShapes?.length
+      ? await buildPromptWithShapeContext(rawPrompt, mentionedShapes)
+      : rawPrompt;
 
-  // Ensure workspace directory exists (guard against stale paths from client)
-  if (!existsSync(workspacePath)) {
-    mkdirSync(workspacePath, { recursive: true });
-  }
+    // If multimodal (array of content blocks), wrap in an async generator yielding SDKUserMessage
+    const prompt: string | AsyncIterable<SDKUserMessage> =
+      typeof promptContent === "string"
+        ? promptContent
+        : (async function* () {
+            yield {
+              type: "user" as const,
+              message: { role: "user" as const, content: promptContent },
+              parent_tool_use_id: null,
+              session_id: "",
+            };
+          })();
 
-  return streamSSE(c, async (stream) => {
-    // Per-request state for message transformation
-    const state = {
-      hasOpenText: false,
-      toolUseIdToName: new Map<string, string>(),
-    };
+    // Ensure workspace directory exists (guard against stale paths from client)
+    if (!existsSync(workspacePath)) {
+      mkdirSync(workspacePath, { recursive: true });
+    }
 
-    // EventEmitter bridge for add_shape tool → SSE stream
-    const pendingShapeEvents: CanvasShapeInstruction[] = [];
-    const emitter = createCanvasToolsEmitter();
-    emitter.on("add_shape", (payload) => pendingShapeEvents.push(payload));
-
-    try {
-      // Build MCP servers config — add canvas tools if projectId is provided
-      const mcpServers: Record<string, ReturnType<typeof createCanvasToolsServer>> = {};
-      const allowedTools: string[] = [];
-
-      if (projectId) {
-        mcpServers["canvas-tools"] = createCanvasToolsServer(projectId, userId, emitter);
-        allowedTools.push(...CANVAS_TOOL_NAMES);
-      }
-
-      const hasCanvasTools = Object.keys(mcpServers).length > 0;
-
-      // Always include Skill tool + Bash for skills that use shell scripts
-      allowedTools.push("Skill", "Bash", "Read", "Write");
-
-      const queryResult = query({
-        prompt,
-        options: {
-          systemPrompt: buildSystemPrompt(hasCanvasTools),
-          cwd: workspacePath,
-          // Use full path to node binary so the SDK can find it regardless of
-          // how the server was started (nvm, volta, etc.)
-          executable: process.execPath as "node",
-          env: { ...process.env },
-          settingSources: ["project"],
-          sandbox: {
-            enabled: true,
-            autoAllowBashIfSandboxed: true,
-            network: { allowLocalBinding: true },
-          },
-          permissionMode: "acceptEdits",
-          maxTurns: 30,
-          includePartialMessages: true,
-          allowedTools,
-          ...(sessionId ? { resume: sessionId } : {}),
-          ...(hasCanvasTools ? { mcpServers } : {}),
-        },
+    // Dev-only: create logger for this agent run
+    const isDev = process.env.NODE_ENV !== "production";
+    const logger = isDev ? new AgentLogger(sessionId) : null;
+    if (logger) {
+      logger.logRequest({
+        prompt: rawPrompt,
+        workspacePath,
+        projectId,
+        sessionId,
+        mentionedShapes,
       });
+      console.log(`[Agent] Log: ${logger.getFilePath()}`);
+    }
 
-      for await (const msg of queryResult) {
-        // Drain any shape events queued by add_shape tool handlers
+    return streamSSE(c, async (stream) => {
+      // Per-request state for message transformation
+      const state = {
+        hasOpenText: false,
+        toolUseIdToName: new Map<string, string>(),
+      };
+
+      // EventEmitter bridge for canvas tools → SSE stream
+      const pendingShapeEvents: CanvasShapeInstruction[] = [];
+      const pendingMoveEvents: MoveShapesPayload[] = [];
+      const pendingResizeEvents: ResizeShapesPayload[] = [];
+      const pendingMetaEvents: UpdateShapeMetaPayload[] = [];
+      const emitter = createCanvasToolsEmitter();
+      emitter.on("add_shape", (payload) => pendingShapeEvents.push(payload));
+      emitter.on("move_shapes", (payload) => pendingMoveEvents.push(payload));
+      emitter.on("resize_shapes", (payload) =>
+        pendingResizeEvents.push(payload),
+      );
+      emitter.on("update_shape_meta", (payload) =>
+        pendingMetaEvents.push(payload),
+      );
+
+      // Helper to flush all pending canvas events to the SSE stream
+      async function drainCanvasEvents() {
         while (pendingShapeEvents.length > 0) {
           const instruction = pendingShapeEvents.shift()!;
+          logger?.logShapeEvent(instruction);
           await stream.writeSSE({
             data: JSON.stringify({ type: "canvas_add_shape", instruction }),
             event: "canvas_add_shape",
           });
         }
-
-        const messages = transformMessage(msg, state);
-        for (const m of messages) {
+        while (pendingMoveEvents.length > 0) {
+          const payload = pendingMoveEvents.shift()!;
           await stream.writeSSE({
-            data: JSON.stringify(m),
-            event: m.type,
+            data: JSON.stringify({ type: "canvas_move_shapes", payload }),
+            event: "canvas_move_shapes",
+          });
+        }
+        while (pendingResizeEvents.length > 0) {
+          const payload = pendingResizeEvents.shift()!;
+          await stream.writeSSE({
+            data: JSON.stringify({ type: "canvas_resize_shapes", payload }),
+            event: "canvas_resize_shapes",
+          });
+        }
+        while (pendingMetaEvents.length > 0) {
+          const payload = pendingMetaEvents.shift()!;
+          await stream.writeSSE({
+            data: JSON.stringify({
+              type: "canvas_update_shape_meta",
+              payload,
+            }),
+            event: "canvas_update_shape_meta",
           });
         }
       }
 
-      // Final drain — flush shapes emitted during the last iteration
-      while (pendingShapeEvents.length > 0) {
-        const instruction = pendingShapeEvents.shift()!;
+      try {
+        // Build MCP servers config — add canvas tools if projectId is provided
+        const mcpServers: Record<
+          string,
+          ReturnType<typeof createCanvasToolsServer>
+        > = {};
+        const allowedTools: string[] = [];
+
+        if (projectId) {
+          mcpServers["canvas-tools"] = createCanvasToolsServer(
+            projectId,
+            userId,
+            emitter,
+          );
+          allowedTools.push(...CANVAS_TOOL_NAMES);
+        }
+
+        const hasCanvasTools = Object.keys(mcpServers).length > 0;
+
+        // Always include Skill tool + Bash for skills that use shell scripts
+        allowedTools.push("Skill", "Bash", "Read", "Write");
+
+        const queryResult = query({
+          prompt,
+          options: {
+            systemPrompt: buildSystemPrompt(hasCanvasTools),
+            cwd: workspacePath,
+            // Use full path to node binary so the SDK can find it regardless of
+            // how the server was started (nvm, volta, etc.)
+            executable: process.execPath as "node",
+            env: { ...process.env },
+            settingSources: ["project"],
+            sandbox: {
+              enabled: true,
+              autoAllowBashIfSandboxed: true,
+              network: { allowLocalBinding: true },
+            },
+            permissionMode: "acceptEdits",
+            maxTurns: 30,
+            includePartialMessages: true,
+            allowedTools,
+            ...(sessionId ? { resume: sessionId } : {}),
+            ...(hasCanvasTools ? { mcpServers } : {}),
+          },
+        });
+
+        for await (const msg of queryResult) {
+          logger?.logSdkMessage(msg);
+
+          // Drain any canvas events queued by tool handlers
+          await drainCanvasEvents();
+
+          const messages = transformMessage(msg, state);
+          for (const m of messages) {
+            await stream.writeSSE({
+              data: JSON.stringify(m),
+              event: m.type,
+            });
+          }
+        }
+
+        await drainCanvasEvents();
+        logger?.logDone();
+      } catch (error) {
+        // Flush any canvas events that succeeded before the error
+        await drainCanvasEvents();
+        console.error("[Agent] Error:", error);
+        logger?.logError(error);
         await stream.writeSSE({
-          data: JSON.stringify({ type: "canvas_add_shape", instruction }),
-          event: "canvas_add_shape",
+          data: JSON.stringify({
+            type: "error",
+            message: error instanceof Error ? error.message : String(error),
+          }),
+          event: "error",
         });
       }
-    } catch (error) {
-      console.error("[Agent] Error:", error);
-      await stream.writeSSE({
-        data: JSON.stringify({
-          type: "error",
-          message: error instanceof Error ? error.message : String(error),
-        }),
-        event: "error",
-      });
-    }
-  });
-});
+    });
+  },
+);
 
 /**
  * Per-request state used during message transformation
@@ -307,7 +461,9 @@ function transformMessage(msg: unknown, state: TransformState): AgentMessage[] {
             type: "tool_result",
             toolId,
             output:
-              typeof block.content === "string" ? block.content : JSON.stringify(block.content),
+              typeof block.content === "string"
+                ? block.content
+                : JSON.stringify(block.content),
           });
         }
       }

@@ -1,5 +1,10 @@
 import { type AgentMessage, type MentionedShapeContext, subscribeAgentSSE } from "@/lib/agent-sse";
-import { requestCanvasAddShape } from "@/lib/canvas-events";
+import {
+  requestCanvasAddShape,
+  requestCanvasMoveShapes,
+  requestCanvasResizeShapes,
+  requestCanvasUpdateShapeMeta,
+} from "@/lib/canvas-events";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -339,6 +344,18 @@ function applyMessage(msg: AgentMessage, get: Get, set: Set): void {
     case "canvas_add_shape": {
       // Delegate to canvas event bus — store stays canvas-agnostic
       requestCanvasAddShape(msg.instruction);
+      return;
+    }
+    case "canvas_move_shapes": {
+      requestCanvasMoveShapes(msg.payload);
+      return;
+    }
+    case "canvas_resize_shapes": {
+      requestCanvasResizeShapes(msg.payload);
+      return;
+    }
+    case "canvas_update_shape_meta": {
+      requestCanvasUpdateShapeMeta(msg.payload);
       return;
     }
   }

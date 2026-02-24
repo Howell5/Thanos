@@ -6,13 +6,24 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { EventEmitter } from "node:events";
 import { z } from "zod";
-import type { CanvasShapeInstruction } from "@repo/shared";
+import type {
+  CanvasShapeInstruction,
+  MoveShapesPayload,
+  ResizeShapesPayload,
+  UpdateShapeMetaPayload,
+} from "@repo/shared";
 
 // ─── EventEmitter Bridge ─────────────────────────────────────
 
 export interface CanvasToolsEmitter extends EventEmitter {
   emit(event: "add_shape", payload: CanvasShapeInstruction): boolean;
   on(event: "add_shape", listener: (payload: CanvasShapeInstruction) => void): this;
+  emit(event: "move_shapes", payload: MoveShapesPayload): boolean;
+  on(event: "move_shapes", listener: (payload: MoveShapesPayload) => void): this;
+  emit(event: "resize_shapes", payload: ResizeShapesPayload): boolean;
+  on(event: "resize_shapes", listener: (payload: ResizeShapesPayload) => void): this;
+  emit(event: "update_shape_meta", payload: UpdateShapeMetaPayload): boolean;
+  on(event: "update_shape_meta", listener: (payload: UpdateShapeMetaPayload) => void): this;
 }
 
 export function createCanvasToolsEmitter(): CanvasToolsEmitter {
@@ -38,9 +49,8 @@ IMPORTANT — readability & layout guidelines:
       // Content fields — required depending on shapeType
       url: z
         .string()
-        .url()
         .optional()
-        .describe("Asset URL (required for image, video, file, audio)"),
+        .describe("Asset URL — http(s) or data: URI (required for image, video, file, audio)"),
       content: z
         .string()
         .optional()

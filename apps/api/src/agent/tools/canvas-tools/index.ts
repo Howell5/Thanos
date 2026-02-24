@@ -16,6 +16,11 @@ import { analyzeVideoAndWait } from "../../../services/video-analysis.service";
 import { createEditingPlanTool } from "../editing-plan-tool";
 import { createRenderVideoTool } from "../render-video-tool";
 import { syncCanvasVideosToDb } from "../sync-canvas-videos";
+import {
+  createMoveShapesTool,
+  createResizeShapesTool,
+  createUpdateShapeMetaTool,
+} from "./canvas-mutate-tools";
 import { createGetShapeTool, createListShapesTool } from "./canvas-read-tools";
 import {
   type CanvasToolsEmitter,
@@ -37,8 +42,12 @@ export function createCanvasToolsServer(
       // Canvas read tools
       createListShapesTool(projectId, userId),
       createGetShapeTool(projectId, userId),
-      // Canvas write tool
+      // Canvas write tools
       createAddShapeTool(emitter),
+      // Canvas mutation tools
+      createMoveShapesTool(emitter),
+      createResizeShapesTool(emitter),
+      createUpdateShapeMetaTool(emitter),
       // Video tools (migrated from video-tools.ts)
       createListProjectVideosTool(projectId, userId),
       createSearchVideoClipsTool(projectId),
@@ -54,6 +63,9 @@ export const CANVAS_TOOL_NAMES = [
   "mcp__canvas-tools__list_shapes",
   "mcp__canvas-tools__get_shape",
   "mcp__canvas-tools__add_shape",
+  "mcp__canvas-tools__move_shapes",
+  "mcp__canvas-tools__resize_shapes",
+  "mcp__canvas-tools__update_shape_meta",
   "mcp__canvas-tools__list_project_videos",
   "mcp__canvas-tools__search_video_clips",
   "mcp__canvas-tools__get_video_clips",

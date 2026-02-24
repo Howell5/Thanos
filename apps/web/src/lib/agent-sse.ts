@@ -1,4 +1,9 @@
-import type { CanvasShapeInstruction } from "@repo/shared";
+import type {
+  CanvasShapeInstruction,
+  MoveShapesPayload,
+  ResizeShapesPayload,
+  UpdateShapeMetaPayload,
+} from "@repo/shared";
 import { env } from "../env";
 
 /**
@@ -23,6 +28,9 @@ export type AgentMessage =
   | { type: "tool_use"; toolId: string; tool: string; input: unknown }
   | { type: "tool_result"; toolId: string; output: string }
   | { type: "canvas_add_shape"; instruction: CanvasShapeInstruction }
+  | { type: "canvas_move_shapes"; payload: MoveShapesPayload }
+  | { type: "canvas_resize_shapes"; payload: ResizeShapesPayload }
+  | { type: "canvas_update_shape_meta"; payload: UpdateShapeMetaPayload }
   | { type: "result"; cost: number; inputTokens: number; outputTokens: number }
   | { type: "error"; message: string };
 

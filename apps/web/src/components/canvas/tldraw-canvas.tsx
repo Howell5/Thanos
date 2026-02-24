@@ -17,9 +17,14 @@ import {
   onCanvasAddVideoRequest,
   onCanvasClearHighlight,
   onCanvasHighlightShape,
+  onCanvasMoveShapesRequest,
+  onCanvasResizeShapesRequest,
   onCanvasSaveRequest,
+  onCanvasUpdateShapeMetaRequest,
+  onShapeDescribeRequest,
   requestCanvasSave,
 } from "@/lib/canvas-events";
+import { listenForAssetUploads, pollShapeDescription, syncDescriptionsFromDb } from "@/lib/shape-describe-poller";
 import { handleAddShape } from "@/lib/canvas-shape-builder";
 import { deriveShapeSummaries } from "@/lib/shape-summary";
 import { useCanvasShapeStore } from "@/stores/use-canvas-shape-store";
@@ -96,6 +101,47 @@ function CanvasEventHandler() {
     requestCanvasSave();
   }), [editor]);
 
+  // Listen for agent canvas mutation tool events (move, resize, update_meta)
+  useEffect(() => {
+    const unsubs = [
+      onCanvasMoveShapesRequest(({ ops }) => {
+        for (const op of ops) {
+          const shape = editor.getShape(op.shapeId as Parameters<typeof editor.getShape>[0]);
+          if (!shape) continue;
+          editor.updateShape({ id: shape.id, type: shape.type,
+            x: op.x !== undefined ? op.x : shape.x + (op.dx ?? 0),
+            y: op.y !== undefined ? op.y : shape.y + (op.dy ?? 0),
+          });
+        }
+        requestCanvasSave();
+      }),
+      onCanvasResizeShapesRequest(({ ops }) => {
+        for (const op of ops) {
+          const shape = editor.getShape(op.shapeId as Parameters<typeof editor.getShape>[0]);
+          if (!shape) continue;
+          const cw = (shape.props as { w?: number }).w ?? 0;
+          const ch = (shape.props as { h?: number }).h ?? 0;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic shape type
+          editor.updateShape({ id: shape.id, type: shape.type, props: {
+            w: op.scale != null ? cw * op.scale : (op.width ?? cw),
+            h: op.scale != null ? ch * op.scale : (op.height ?? ch),
+          }} as any);
+        }
+        requestCanvasSave();
+      }),
+      onCanvasUpdateShapeMetaRequest(({ ops }) => {
+        for (const op of ops) {
+          const shape = editor.getShape(op.shapeId as Parameters<typeof editor.getShape>[0]);
+          if (!shape) continue;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic shape type
+          editor.updateShape({ id: shape.id, type: shape.type, meta: { ...shape.meta, ...op.meta } } as any);
+        }
+        requestCanvasSave();
+      }),
+    ];
+    return () => unsubs.forEach((fn) => fn());
+  }, [editor]);
+
   // Sync live shape list to useCanvasShapeStore
   useEffect(() => {
     const syncShapes = () => {
@@ -105,21 +151,21 @@ function CanvasEventHandler() {
     return editor.store.listen(syncShapes, { source: "all", scope: "document" });
   }, [editor]);
 
-  // Handle shape highlight from mention picker hover
+  // Shape highlight, describe polling, and asset upload listeners
   useEffect(() => {
-    return onCanvasHighlightShape((shapeId) => {
-      const shape = editor.getShape(shapeId as Parameters<typeof editor.getShape>[0]);
-      if (shape) {
-        editor.select(shape.id);
-        editor.zoomToSelection({ animation: { duration: 200 } });
-      }
-    });
-  }, [editor]);
-
-  useEffect(() => {
-    return onCanvasClearHighlight(() => {
-      editor.selectNone();
-    });
+    const projectId = useAIStore.getState().projectId;
+    const unsubs = [
+      onCanvasHighlightShape((shapeId) => {
+        const shape = editor.getShape(shapeId as Parameters<typeof editor.getShape>[0]);
+        if (shape) { editor.select(shape.id); editor.zoomToSelection({ animation: { duration: 200 } }); }
+      }),
+      onCanvasClearHighlight(() => editor.selectNone()),
+      onShapeDescribeRequest(({ shapeId, projectId: pid }) => pollShapeDescription(shapeId, pid, editor)),
+      ...(projectId ? [listenForAssetUploads(editor, projectId)] : []),
+    ];
+    // Sync descriptions from DB on mount (backfills descriptions completed after page refresh)
+    if (projectId) syncDescriptionsFromDb(editor, projectId);
+    return () => unsubs.forEach((fn) => fn());
   }, [editor]);
 
   return null;
@@ -147,15 +193,9 @@ const uiComponents: Partial<TLUiComponents> = {
   ImageToolbar: null,
 };
 
-// Check if canvasData has valid snapshot format
 function isValidSnapshot(data: unknown): data is { document: unknown } {
-  return (
-    data !== null &&
-    typeof data === "object" &&
-    "document" in data &&
-    data.document !== null &&
-    typeof data.document === "object"
-  );
+  return data !== null && typeof data === "object" && "document" in data &&
+    data.document !== null && typeof data.document === "object";
 }
 
 // Inner component that has access to the editor
@@ -345,16 +385,9 @@ export function TldrawCanvas({
     [scheduleAutoSave],
   );
 
-  // Cleanup timers on unmount
-  useEffect(() => {
-    return () => {
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current);
-      }
-      if (savedStatusTimerRef.current) {
-        clearTimeout(savedStatusTimerRef.current);
-      }
-    };
+  useEffect(() => () => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    if (savedStatusTimerRef.current) clearTimeout(savedStatusTimerRef.current);
   }, []);
 
   // Subscribe to external save requests (from upload complete, AI generation, etc.)
@@ -399,8 +432,9 @@ export function TldrawCanvas({
 
       for (const file of videoFiles) {
         try {
+          const shapeId = createShapeId();
           const [result, dims] = await Promise.all([
-            uploadImage(file, ""),
+            uploadImage(file, shapeId),
             getVideoDimensions(file),
           ]);
           const maxEdge = Math.max(dims.width, dims.height);
@@ -409,6 +443,7 @@ export function TldrawCanvas({
           const h = Math.round(dims.height * scale);
 
           editor.createShape({
+            id: shapeId,
             type: VIDEO_SHAPE_TYPE,
             x: dropPoint.x - w / 2,
             y: dropPoint.y - h / 2,
