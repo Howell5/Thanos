@@ -82,6 +82,8 @@ export interface ImageMeta {
   // Video info (for video assets)
   videoId?: string; // Database video ID (links to videos table for clip indexing)
   duration?: number; // Video duration in seconds
+  // AI-generated description (populated by shape-describe poller)
+  description?: string;
   // Index signature for JsonObject compatibility
   [key: string]: string | number | boolean | undefined;
 }

@@ -20,9 +20,12 @@ const envSchema = z.object({
     .string()
     .transform((v) => v === "true" || v === "1")
     .default("false"),
-  // Vertex AI configuration
+  // Google Cloud / Vertex AI configuration
+  // Supports both GOOGLE_VERTEX_PROJECT and GOOGLE_CLOUD_PROJECT
   GOOGLE_VERTEX_PROJECT: z.string().optional(),
-  GOOGLE_VERTEX_LOCATION: z.string().default("us-central1"),
+  GOOGLE_CLOUD_PROJECT: z.string().optional(),
+  GOOGLE_VERTEX_LOCATION: z.string().optional(),
+  GOOGLE_CLOUD_LOCATION: z.string().optional(),
   // Cloudflare R2 configuration
   R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),
@@ -32,6 +35,8 @@ const envSchema = z.object({
   // Volcengine TTS configuration
   VOLCENGINE_TTS_APP_ID: z.string().optional(),
   VOLCENGINE_TTS_ACCESS_TOKEN: z.string().optional(),
+  // Kimi K2.5 API (for media description)
+  KIMI_API_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

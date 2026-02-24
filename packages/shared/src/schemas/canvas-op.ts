@@ -19,6 +19,10 @@ export const canvasShapeInstructionSchema = z.discriminatedUnion("shapeType", [
     width: z.number().optional(),
     height: z.number().optional(),
     altText: z.string().optional(),
+    /** Pre-computed description — skips the async AI describe flow */
+    description: z.string().optional(),
+    /** Pre-assigned tldraw shape ID (without "shape:" prefix). If provided, frontend will use this ID. */
+    shapeId: z.string().optional(),
   }),
   z.object({
     shapeType: z.literal("video"),

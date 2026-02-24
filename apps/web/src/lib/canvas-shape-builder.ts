@@ -83,7 +83,7 @@ function addImageShape(
   const w = instruction.width ?? 320;
   const h = instruction.height ?? 320;
   const pos = getAutoPosition(editor, w, h);
-  const shapeId = createShapeId();
+  const shapeId = instruction.shapeId ? createShapeId(instruction.shapeId) : createShapeId();
   const assetId = AssetRecordType.createId();
 
   editor.createAssets([
@@ -109,6 +109,7 @@ function addImageShape(
     x: pos.x,
     y: pos.y,
     props: { assetId, w, h },
+    meta: instruction.description ? { description: instruction.description } : {},
   });
   return shapeId;
 }

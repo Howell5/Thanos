@@ -21,6 +21,7 @@ import {
   createResizeShapesTool,
   createUpdateShapeMetaTool,
 } from "./canvas-mutate-tools";
+import { createGenerateImageTool } from "./canvas-generate-tool";
 import { createGetShapeTool, createListShapesTool } from "./canvas-read-tools";
 import {
   type CanvasToolsEmitter,
@@ -44,6 +45,8 @@ export function createCanvasToolsServer(
       createGetShapeTool(projectId, userId),
       // Canvas write tools
       createAddShapeTool(emitter),
+      // AI generation tool
+      createGenerateImageTool(projectId, userId, emitter),
       // Canvas mutation tools
       createMoveShapesTool(emitter),
       createResizeShapesTool(emitter),
@@ -63,6 +66,7 @@ export const CANVAS_TOOL_NAMES = [
   "mcp__canvas-tools__list_shapes",
   "mcp__canvas-tools__get_shape",
   "mcp__canvas-tools__add_shape",
+  "mcp__canvas-tools__generate_image",
   "mcp__canvas-tools__move_shapes",
   "mcp__canvas-tools__resize_shapes",
   "mcp__canvas-tools__update_shape_meta",

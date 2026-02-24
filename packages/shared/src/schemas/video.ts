@@ -67,6 +67,8 @@ export const createVideoSchema = z.object({
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
   duration: z.number().int().positive().optional(),
+  // tldraw shape ID for triggering auto-describe
+  shapeId: z.string().optional(),
 });
 
 export type CreateVideo = z.infer<typeof createVideoSchema>;

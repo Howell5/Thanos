@@ -279,6 +279,40 @@ export const editingPlans = pgTable("editing_plans", {
 });
 
 /**
+ * Shape Metadata table
+ * Stores AI-generated descriptions and metadata for canvas shapes
+ */
+export const shapeMetadata = pgTable(
+  "shape_metadata",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // tldraw shape ID (e.g. "shape:abc123")
+    shapeId: text("shape_id").notNull(),
+    // Media type: "image" | "video"
+    mediaType: text("media_type").notNull(),
+    // Original filename from upload
+    originalFileName: text("original_file_name"),
+    // AI-generated description
+    description: text("description"),
+    // Status: "pending" | "processing" | "done" | "failed" | "skipped"
+    status: text("status").notNull().default("pending"),
+    error: text("error"),
+    // Model used for description
+    model: text("model"),
+    completedAt: timestamp("completed_at", { mode: "date", withTimezone: true }),
+    createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [unique("shape_metadata_shape_project_unique").on(table.shapeId, table.projectId)],
+);
+
+/**
  * AI Usage History table
  * Detailed tracking of all AI API calls (for analytics and debugging)
  */
@@ -318,6 +352,7 @@ export const userRelations = relations(user, ({ many }) => ({
   aiUsageHistory: many(aiUsageHistory),
   videos: many(videos),
   editingPlans: many(editingPlans),
+  shapeMetadata: many(shapeMetadata),
 }));
 
 export const postsRelations = relations(posts, ({ one }) => ({
@@ -356,6 +391,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   images: many(aiImages),
   videos: many(videos),
   editingPlans: many(editingPlans),
+  shapeMetadata: many(shapeMetadata),
 }));
 
 export const aiImagesRelations = relations(aiImages, ({ one }) => ({
@@ -400,6 +436,17 @@ export const videoClipsRelations = relations(videoClips, ({ one }) => ({
   video: one(videos, {
     fields: [videoClips.videoId],
     references: [videos.id],
+  }),
+}));
+
+export const shapeMetadataRelations = relations(shapeMetadata, ({ one }) => ({
+  project: one(projects, {
+    fields: [shapeMetadata.projectId],
+    references: [projects.id],
+  }),
+  user: one(user, {
+    fields: [shapeMetadata.userId],
+    references: [user.id],
   }),
 }));
 

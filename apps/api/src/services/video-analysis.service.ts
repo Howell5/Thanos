@@ -75,10 +75,16 @@ function isGeminiConfigured(): boolean {
  * Trigger video analysis in background
  * This function returns immediately and runs analysis asynchronously
  */
-export function triggerVideoAnalysis(videoId: string, analysisRequest?: string): void {
+export function triggerVideoAnalysis(
+  videoId: string,
+  analysisRequest?: string,
+): void {
   // Run in background, don't await
   analyzeVideoBackground(videoId, analysisRequest).catch((err) => {
-    console.error(`[VideoAnalysis] Background analysis failed for ${videoId}:`, err);
+    console.error(
+      `[VideoAnalysis] Background analysis failed for ${videoId}:`,
+      err,
+    );
   });
 }
 
@@ -110,7 +116,10 @@ export async function analyzeVideoAndWait(
  * Background video analysis task
  * Updates status in DB as it progresses
  */
-async function analyzeVideoBackground(videoId: string, analysisRequest?: string): Promise<void> {
+async function analyzeVideoBackground(
+  videoId: string,
+  analysisRequest?: string,
+): Promise<void> {
   console.log(`[VideoAnalysis] Starting analysis for video ${videoId}`);
 
   // 1. Update status to analyzing
@@ -136,9 +145,14 @@ async function analyzeVideoBackground(videoId: string, analysisRequest?: string)
 
     // 4. Analyze video with Gemini
     const userRequest = analysisRequest || video.analysisRequest;
-    const analysisResult = await analyzeVideoWithGemini(video.r2Url, userRequest || undefined);
+    const analysisResult = await analyzeVideoWithGemini(
+      video.r2Url,
+      userRequest || undefined,
+    );
 
-    console.log(`[VideoAnalysis] Gemini analysis complete for ${videoId}, parsing clips...`);
+    console.log(
+      `[VideoAnalysis] Gemini analysis complete for ${videoId}, parsing clips...`,
+    );
 
     // 5. Parse JSON clip data
     const clips = parseClipJson(analysisResult, videoId);
@@ -164,7 +178,9 @@ async function analyzeVideoBackground(videoId: string, analysisRequest?: string)
         .where(eq(videos.id, videoId));
     });
 
-    console.log(`[VideoAnalysis] Analysis complete for ${videoId}, ${clips.length} clips saved`);
+    console.log(
+      `[VideoAnalysis] Analysis complete for ${videoId}, ${clips.length} clips saved`,
+    );
   } catch (error) {
     // 7. Record failure
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -185,13 +201,18 @@ async function analyzeVideoBackground(videoId: string, analysisRequest?: string)
  * Analyze video using Gemini Flash
  * Downloads video, sends to Gemini, returns raw analysis text
  */
-async function analyzeVideoWithGemini(videoUrl: string, userRequest?: string): Promise<string> {
+async function analyzeVideoWithGemini(
+  videoUrl: string,
+  userRequest?: string,
+): Promise<string> {
   console.log(`[VideoAnalysis] Downloading video from ${videoUrl}`);
 
   // 1. Download video
   const response = await fetch(videoUrl);
   if (!response.ok) {
-    throw new Error(`Failed to download video: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `Failed to download video: ${response.status} ${response.statusText}`,
+    );
   }
 
   const videoBuffer = await response.arrayBuffer();
@@ -210,7 +231,10 @@ async function analyzeVideoWithGemini(videoUrl: string, userRequest?: string): P
   // 3. Build prompt
   let prompt: string;
   if (userRequest) {
-    prompt = VIDEO_ANALYSIS_PROMPT_TEMPLATE.replace("{user_request}", userRequest);
+    prompt = VIDEO_ANALYSIS_PROMPT_TEMPLATE.replace(
+      "{user_request}",
+      userRequest,
+    );
   } else {
     prompt = DEFAULT_VIDEO_ANALYSIS_PROMPT;
   }
@@ -221,7 +245,7 @@ async function analyzeVideoWithGemini(videoUrl: string, userRequest?: string): P
   console.log("[VideoAnalysis] Sending to Gemini for analysis...");
 
   const geminiResponse = await ai.models.generateContent({
-    model: "gemini-2.0-flash",
+    model: "gemini-2.5-flash",
     contents: [
       {
         inlineData: {
@@ -246,7 +270,9 @@ async function analyzeVideoWithGemini(videoUrl: string, userRequest?: string): P
   // Find text part
   for (const part of candidate.content.parts) {
     if (part.text) {
-      console.log(`[VideoAnalysis] Received analysis (${part.text.length} chars)`);
+      console.log(
+        `[VideoAnalysis] Received analysis (${part.text.length} chars)`,
+      );
       return part.text;
     }
   }

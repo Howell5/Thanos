@@ -39,6 +39,8 @@ export interface ShapeSummary {
   w: number | null;
   h: number | null;
   brief: string;
+  fileName: string | null;
+  description: string | null;
 }
 
 /** Parsed result from tldraw canvasData store */
@@ -119,11 +121,45 @@ function computeBrief(shape: TldrawShape, assets: Map<string, TldrawAsset>): str
   }
 }
 
+/** Metadata map type for enriching shape summaries */
+export type ShapeMetadataMap = Map<
+  string,
+  { description: string | null; originalFileName: string | null }
+>;
+
+/** Extract filename from shape props or linked asset */
+function extractFileName(
+  shape: TldrawShape,
+  assets: Map<string, TldrawAsset>,
+): string | null {
+  const props = shape.props ?? {};
+  // Video shapes store fileName directly
+  if (shape.type === "canvas-video" && typeof props.fileName === "string") {
+    return props.fileName;
+  }
+  // Image shapes: check linked asset name
+  if (shape.type === "image") {
+    const assetId = props.assetId as string | undefined;
+    const asset = assetId ? assets.get(assetId) : undefined;
+    const name = asset?.props.name;
+    if (name && name !== "placeholder" && name !== "agent-image" && name !== "generated-image.png") {
+      return name;
+    }
+  }
+  // Rich cards store fileName in title
+  if (shape.type === "rich-card" && typeof props.title === "string") {
+    return props.title;
+  }
+  return null;
+}
+
 export function getShapeSummary(
   shape: TldrawShape,
   assets: Map<string, TldrawAsset> = new Map(),
+  metadataMap: ShapeMetadataMap = new Map(),
 ): ShapeSummary {
   const props = shape.props ?? {};
+  const meta = metadataMap.get(shape.id);
   return {
     id: shape.id,
     type: shape.type,
@@ -132,6 +168,8 @@ export function getShapeSummary(
     w: typeof props.w === "number" ? props.w : null,
     h: typeof props.h === "number" ? props.h : null,
     brief: computeBrief(shape, assets),
+    fileName: meta?.originalFileName ?? extractFileName(shape, assets),
+    description: meta?.description ?? null,
   };
 }
 

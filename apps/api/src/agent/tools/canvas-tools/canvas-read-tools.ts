@@ -5,6 +5,7 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { getShapeSummary, loadProjectStore, resolveImageAsset } from "./canvas-helpers";
+import { loadProjectShapeMetadata } from "../../../services/shape-describe.service";
 
 export function createListShapesTool(projectId: string, userId: string) {
   return tool(
@@ -18,12 +19,15 @@ export function createListShapesTool(projectId: string, userId: string) {
     },
     async (args) => {
       try {
-        const { shapes, assets } = await loadProjectStore(projectId, userId);
+        const [{ shapes, assets }, metadataMap] = await Promise.all([
+          loadProjectStore(projectId, userId),
+          loadProjectShapeMetadata(projectId),
+        ]);
 
         const filtered =
           args.type === "all" ? shapes : shapes.filter((s) => s.type === args.type);
 
-        const summaries = filtered.map((s) => getShapeSummary(s, assets));
+        const summaries = filtered.map((s) => getShapeSummary(s, assets, metadataMap));
 
         return {
           content: [
@@ -67,7 +71,10 @@ export function createGetShapeTool(projectId: string, userId: string) {
     },
     async (args) => {
       try {
-        const { shapes, assets } = await loadProjectStore(projectId, userId);
+        const [{ shapes, assets }, metadataMap] = await Promise.all([
+          loadProjectStore(projectId, userId),
+          loadProjectShapeMetadata(projectId),
+        ]);
         const shape = shapes.find((s) => s.id === args.shapeId);
 
         if (!shape) {
@@ -92,7 +99,8 @@ export function createGetShapeTool(projectId: string, userId: string) {
         if (shape.type === "image") {
           const imageAsset = resolveImageAsset(shape, assets);
           if (imageAsset) {
-            // Include text metadata
+            const shapeMeta = metadataMap.get(shape.id);
+            // Include text metadata (with imageUrl so agent can copy via add_shape)
             content.push({
               type: "text" as const,
               text: JSON.stringify(
@@ -104,6 +112,9 @@ export function createGetShapeTool(projectId: string, userId: string) {
                   props: { w: shape.props.w, h: shape.props.h, assetId: shape.props.assetId },
                   assetName: imageAsset.name,
                   mimeType: imageAsset.mimeType,
+                  imageUrl: imageAsset.src,
+                  fileName: shapeMeta?.originalFileName ?? imageAsset.name,
+                  description: shapeMeta?.description ?? null,
                 },
                 null,
                 2,
@@ -147,6 +158,8 @@ export function createGetShapeTool(projectId: string, userId: string) {
                       assetName: imageAsset.name,
                       mimeType: imageAsset.mimeType,
                       imageUrl: imageAsset.src,
+                      fileName: shapeMeta?.originalFileName ?? imageAsset.name,
+                      description: shapeMeta?.description ?? null,
                     },
                     null,
                     2,
@@ -159,9 +172,19 @@ export function createGetShapeTool(projectId: string, userId: string) {
 
         // For non-image shapes or if image asset wasn't found, return full shape JSON
         if (content.length === 0) {
+          const shapeMeta = metadataMap.get(shape.id);
           content.push({
             type: "text" as const,
-            text: JSON.stringify(shape, null, 2),
+            text: JSON.stringify(
+              {
+                ...shape,
+                _metadata: shapeMeta
+                  ? { fileName: shapeMeta.originalFileName, description: shapeMeta.description }
+                  : null,
+              },
+              null,
+              2,
+            ),
           });
         }
 
