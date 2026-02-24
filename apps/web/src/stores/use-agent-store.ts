@@ -1,4 +1,5 @@
 import { type AgentMessage, subscribeAgentSSE } from "@/lib/agent-sse";
+import { requestCanvasAddShape } from "@/lib/canvas-events";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -63,7 +64,8 @@ interface AgentState {
   ) => void;
 }
 
-const DEFAULT_WORKSPACE_PATH = "/Users/willhong/Code/Work/Thanos/workspaces/test-project";
+const DEFAULT_WORKSPACE_PATH =
+  import.meta.env.VITE_WORKSPACE_PATH || "/Users/xerwanderer/Developer/Thanos/workspaces/default";
 
 const EMPTY_SESSION: ProjectSession = {
   sessionId: null,
@@ -227,7 +229,6 @@ export const useAgentStore = create<AgentState>()(
       partialize: (state) => ({
         // Persist the sessions map (merge current active state first)
         sessions: saveCurrentSession(state),
-        workspacePath: state.workspacePath,
         projectId: state.projectId,
       }),
       // On rehydrate, restore active project's session from the map
@@ -331,6 +332,12 @@ function applyMessage(msg: AgentMessage, get: Get, set: Set): void {
     case "error": {
       msgs.push({ type: "error", message: msg.message });
       set({ messages: msgs, status: "error", error: msg.message, _abortFn: null });
+      return;
+    }
+
+    case "canvas_add_shape": {
+      // Delegate to canvas event bus — store stays canvas-agnostic
+      requestCanvasAddShape(msg.instruction);
       return;
     }
   }

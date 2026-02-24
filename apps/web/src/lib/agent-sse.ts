@@ -1,3 +1,4 @@
+import type { CanvasShapeInstruction } from "@repo/shared";
 import { env } from "../env";
 
 /**
@@ -8,9 +9,12 @@ import { env } from "../env";
  * - text_done: current text block is finalized
  * - tool_use: a tool was invoked (name + input)
  * - tool_result: result for a previous tool_use (matched by toolId)
+ * - canvas_add_shape: agent requested adding a shape to the canvas
  * - system: session init
  * - result: agent finished with cost/token stats
  * - error: something went wrong
+ *
+ * Keep in sync with apps/api/src/routes/agent.ts
  */
 export type AgentMessage =
   | { type: "system"; sessionId: string }
@@ -18,6 +22,7 @@ export type AgentMessage =
   | { type: "text_done" }
   | { type: "tool_use"; toolId: string; tool: string; input: unknown }
   | { type: "tool_result"; toolId: string; output: string }
+  | { type: "canvas_add_shape"; instruction: CanvasShapeInstruction }
   | { type: "result"; cost: number; inputTokens: number; outputTokens: number }
   | { type: "error"; message: string };
 

@@ -10,15 +10,16 @@ import {
 } from "tldraw";
 import "tldraw/tldraw.css";
 import { Button } from "@/components/ui/button";
-import { useAgentCanvasSync } from "@/hooks/use-agent-canvas-sync";
 import { useAgentRenderer } from "@/hooks/use-agent-renderer";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import {
   type AddVideoPayload,
+  onCanvasAddShapeRequest,
   onCanvasAddVideoRequest,
   onCanvasSaveRequest,
   requestCanvasSave,
 } from "@/lib/canvas-events";
+import { handleAddShape } from "@/lib/canvas-shape-builder";
 import {
   DEFAULT_MAX_IMAGE_SIZE,
   type ImageMeta,
@@ -34,7 +35,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { AgentTurnShapeUtil } from "./agent-turn-shape";
-import { BottomPromptPanel } from "./bottom-prompt-panel";
 import { FloatingToolbar } from "./floating-toolbar";
 import { GeneratingOverlay } from "./generating-overlay";
 import { InpaintingOverlay } from "./inpainting-overlay";
@@ -74,9 +74,6 @@ function CanvasEventHandler() {
   // Connect agent renderer to canvas (for artifact placement)
   useAgentRenderer(editor);
 
-  // Sync agent turns to canvas shapes
-  useAgentCanvasSync(editor);
-
   useEffect(() => {
     return editor.store.listen(
       (entry) => {
@@ -107,6 +104,12 @@ function CanvasEventHandler() {
     });
   }, [editor]);
 
+  // Listen for agent add_shape tool events
+  useEffect(() => onCanvasAddShapeRequest((instruction) => {
+    handleAddShape(editor, instruction);
+    requestCanvasSave();
+  }), [editor]);
+
   return null;
 }
 
@@ -116,7 +119,6 @@ function InFrontOfTheCanvas() {
   return (
     <>
       <FloatingToolbar />
-      {/* <BottomPromptPanel /> */}
       <GeneratingOverlay />
       <InpaintingOverlay />
       <UploadingOverlay />

@@ -3,12 +3,15 @@
  * Uses native CustomEvent for zero-dependency, decoupled event handling
  */
 
+import type { CanvasShapeInstruction } from "@repo/shared";
+
 // Canvas event types
 export const CANVAS_EVENTS = {
   REQUEST_SAVE: "canvas:requestSave",
   SAVED: "canvas:saved",
   SAVE_ERROR: "canvas:saveError",
   REQUEST_ADD_VIDEO: "canvas:requestAddVideo",
+  REQUEST_ADD_SHAPE: "canvas:requestAddShape",
 } as const;
 
 // Event payload types
@@ -93,4 +96,27 @@ export function onCanvasAddVideoRequest(callback: (payload: AddVideoPayload) => 
   };
   window.addEventListener(CANVAS_EVENTS.REQUEST_ADD_VIDEO, handler);
   return () => window.removeEventListener(CANVAS_EVENTS.REQUEST_ADD_VIDEO, handler);
+}
+
+/**
+ * Request canvas to add a shape (from agent add_shape tool)
+ */
+export function requestCanvasAddShape(instruction: CanvasShapeInstruction) {
+  window.dispatchEvent(
+    new CustomEvent<CanvasShapeInstruction>(CANVAS_EVENTS.REQUEST_ADD_SHAPE, {
+      detail: instruction,
+    }),
+  );
+}
+
+/**
+ * Subscribe to shape add request events
+ * @returns Unsubscribe function
+ */
+export function onCanvasAddShapeRequest(callback: (instruction: CanvasShapeInstruction) => void) {
+  const handler = (e: Event) => {
+    callback((e as CustomEvent<CanvasShapeInstruction>).detail);
+  };
+  window.addEventListener(CANVAS_EVENTS.REQUEST_ADD_SHAPE, handler);
+  return () => window.removeEventListener(CANVAS_EVENTS.REQUEST_ADD_SHAPE, handler);
 }

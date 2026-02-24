@@ -1,7 +1,7 @@
 import type { AgentTurn, TurnSegment } from "@/lib/agent-turns";
 import { requestCanvasAddVideo } from "@/lib/canvas-events";
 import { Film, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import Markdown from "react-markdown";
 
 // ─── Video Detection ────────────────────────────────────────
@@ -96,14 +96,6 @@ const markdownComponents = {
 
 export function TextSegmentView({ content, finalized }: { content: string; finalized: boolean }) {
   const videoUrl = finalized ? extractVideoUrl(content) : null;
-  const autoAddedRef = useRef(false);
-
-  useEffect(() => {
-    if (videoUrl && !autoAddedRef.current) {
-      autoAddedRef.current = true;
-      requestCanvasAddVideo(videoUrl, "Agent Video");
-    }
-  }, [videoUrl]);
 
   return (
     <div>

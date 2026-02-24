@@ -1,9 +1,15 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { zValidator } from "@hono/zod-validator";
+import type { CanvasShapeInstruction } from "@repo/shared";
+import { existsSync, mkdirSync } from "node:fs";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
-import { VIDEO_TOOL_NAMES, createVideoToolsServer } from "../agent/tools/video-tools";
+import {
+  CANVAS_TOOL_NAMES,
+  createCanvasToolsEmitter,
+  createCanvasToolsServer,
+} from "../agent/tools/canvas-tools";
 import { getSessionOrMock } from "../lib/mock-session";
 import { errors } from "../lib/response";
 
@@ -12,21 +18,22 @@ const runAgentSchema = z.object({
   prompt: z.string().min(1),
   workspacePath: z.string().min(1),
   sessionId: z.string().optional(),
-  projectId: z.string().uuid().optional().describe("Project ID for video tools access"),
+  projectId: z.string().uuid().optional().describe("Project ID for canvas tools access"),
 });
 
 /**
  * Message-based event model.
  *
- * Instead of raw events (thinking, tool_start, tool_end), we emit
- * finalized "message snapshots":
- *
  * - text_delta: streaming text fragment (append to current text message)
  * - text_done: the accumulated text block is finalized
- * - tool_use: a tool was invoked (complete: tool name + input + output if available)
+ * - tool_use: a tool was invoked (complete: tool name + input)
+ * - tool_result: result for a previous tool_use
+ * - canvas_add_shape: agent requested adding a shape to the canvas
  * - system: session init
  * - result: agent finished (cost, tokens)
  * - error: something went wrong
+ *
+ * Keep in sync with apps/web/src/lib/agent-sse.ts
  */
 type AgentMessage =
   | { type: "system"; sessionId: string }
@@ -34,6 +41,7 @@ type AgentMessage =
   | { type: "text_done" }
   | { type: "tool_use"; toolId: string; tool: string; input: unknown }
   | { type: "tool_result"; toolId: string; output: string }
+  | { type: "canvas_add_shape"; instruction: CanvasShapeInstruction }
   | { type: "result"; cost: number; inputTokens: number; outputTokens: number }
   | { type: "error"; message: string };
 
@@ -46,6 +54,11 @@ const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), a
   const { prompt, workspacePath, sessionId, projectId } = c.req.valid("json");
   const userId = session.user.id;
 
+  // Ensure workspace directory exists (guard against stale paths from client)
+  if (!existsSync(workspacePath)) {
+    mkdirSync(workspacePath, { recursive: true });
+  }
+
   return streamSSE(c, async (stream) => {
     // Per-request state for message transformation
     const state = {
@@ -53,20 +66,28 @@ const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), a
       toolUseIdToName: new Map<string, string>(),
     };
 
+    // EventEmitter bridge for add_shape tool → SSE stream
+    const pendingShapeEvents: CanvasShapeInstruction[] = [];
+    const emitter = createCanvasToolsEmitter();
+    emitter.on("add_shape", (payload) => pendingShapeEvents.push(payload));
+
     try {
-      // Build MCP servers config - add video tools if projectId is provided
-      const mcpServers: Record<string, ReturnType<typeof createVideoToolsServer>> = {};
+      // Build MCP servers config — add canvas tools if projectId is provided
+      const mcpServers: Record<string, ReturnType<typeof createCanvasToolsServer>> = {};
       const allowedTools: string[] = [];
 
       if (projectId) {
-        mcpServers["video-tools"] = createVideoToolsServer(projectId, userId);
-        allowedTools.push(...VIDEO_TOOL_NAMES);
+        mcpServers["canvas-tools"] = createCanvasToolsServer(projectId, userId, emitter);
+        allowedTools.push(...CANVAS_TOOL_NAMES);
       }
 
       const queryResult = query({
         prompt,
         options: {
           cwd: workspacePath,
+          // Use full path to node binary so the SDK can find it regardless of
+          // how the server was started (nvm, volta, etc.)
+          executable: process.execPath as "node",
           env: { ...process.env },
           sandbox: {
             enabled: true,
@@ -77,7 +98,6 @@ const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), a
           maxTurns: 30,
           includePartialMessages: true,
           ...(sessionId ? { resume: sessionId } : {}),
-          // Add video tools if available
           ...(Object.keys(mcpServers).length > 0
             ? { mcpServers, allowedTools: [...allowedTools] }
             : {}),
@@ -85,6 +105,15 @@ const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), a
       });
 
       for await (const msg of queryResult) {
+        // Drain any shape events queued by add_shape tool handlers
+        while (pendingShapeEvents.length > 0) {
+          const instruction = pendingShapeEvents.shift()!;
+          await stream.writeSSE({
+            data: JSON.stringify({ type: "canvas_add_shape", instruction }),
+            event: "canvas_add_shape",
+          });
+        }
+
         const messages = transformMessage(msg, state);
         for (const m of messages) {
           await stream.writeSSE({
@@ -92,6 +121,15 @@ const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), a
             event: m.type,
           });
         }
+      }
+
+      // Final drain — flush shapes emitted during the last iteration
+      while (pendingShapeEvents.length > 0) {
+        const instruction = pendingShapeEvents.shift()!;
+        await stream.writeSSE({
+          data: JSON.stringify({ type: "canvas_add_shape", instruction }),
+          event: "canvas_add_shape",
+        });
       }
     } catch (error) {
       console.error("[Agent] Error:", error);
