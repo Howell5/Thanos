@@ -1,9 +1,12 @@
 import { Button } from "@/components/ui/button";
+import { useMentionInput } from "@/hooks/use-mention-input";
 import { coalesceMessages } from "@/lib/agent-turns";
 import { selectCanStart, selectIsRunning, useAgentStore } from "@/stores/use-agent-store";
+import type { CanvasShapeSummary } from "@/stores/use-canvas-shape-store";
 import { ChevronRight, Play, RotateCcw, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TurnView } from "./agent-turn-segments";
+import { ShapeMentionPicker } from "./shape-mention-picker";
 
 // ─── Props ──────────────────────────────────────────────────
 
@@ -16,7 +19,13 @@ interface AgentChatPanelProps {
 
 export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
   const [prompt, setPrompt] = useState("");
+  const [mentionedShapes, setMentionedShapes] = useState<CanvasShapeSummary[]>([]);
   const feedRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Mention input hook
+  const { mentionState, handleChange, handleKeyDown: handleMentionKeyDown, insertMention, closeMention } =
+    useMentionInput(prompt, setPrompt, textareaRef);
 
   // Store state
   const status = useAgentStore((s) => s.status);
@@ -47,10 +56,13 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
 
   const handleRun = useCallback(() => {
     if (prompt.trim() && canStart) {
-      sendMessage(prompt.trim());
+      // Reconcile: only include shapes whose @[brief] tag is still in the prompt
+      const activeShapes = mentionedShapes.filter((s) => prompt.includes(`@[${s.brief}]`));
+      sendMessage(prompt.trim(), activeShapes.length > 0 ? activeShapes : undefined);
       setPrompt("");
+      setMentionedShapes([]);
     }
-  }, [prompt, canStart, sendMessage]);
+  }, [prompt, canStart, sendMessage, mentionedShapes]);
 
   const handleStop = useCallback(() => {
     stop();
@@ -59,16 +71,31 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
   const handleReset = useCallback(() => {
     reset();
     setPrompt("");
+    setMentionedShapes([]);
   }, [reset]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Let mention picker handle keys first when open
+      handleMentionKeyDown(e);
+      if (e.defaultPrevented) return;
+
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
         handleRun();
       }
     },
-    [handleRun],
+    [handleRun, handleMentionKeyDown],
+  );
+
+  const handleMentionSelect = useCallback(
+    (shape: CanvasShapeSummary) => {
+      insertMention(shape);
+      setMentionedShapes((prev) =>
+        prev.some((s) => s.id === shape.id) ? prev : [...prev, shape],
+      );
+    },
+    [insertMention],
   );
 
   const statusConfig = {
@@ -118,13 +145,25 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
       </div>
 
       {/* Input Area */}
-      <div className="border-t border-gray-100 p-3">
+      <div className="relative border-t border-gray-100 p-3">
+        {mentionState.isOpen && mentionState.anchorRect && (
+          <ShapeMentionPicker
+            query={mentionState.query}
+            anchorRect={mentionState.anchorRect}
+            activeIndex={mentionState.activeIndex}
+            onSelect={handleMentionSelect}
+            onClose={closeMention}
+          />
+        )}
         <textarea
+          ref={textareaRef}
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
+          onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder={
-            hasSession ? "Continue conversation... (⌘+Enter)" : "Enter prompt... (⌘+Enter to run)"
+            hasSession
+              ? "Continue conversation... (@ to mention shapes, ⌘+Enter)"
+              : "Enter prompt... (@ to mention shapes, ⌘+Enter to run)"
           }
           disabled={isRunning}
           rows={3}

@@ -12,6 +12,8 @@ export const CANVAS_EVENTS = {
   SAVE_ERROR: "canvas:saveError",
   REQUEST_ADD_VIDEO: "canvas:requestAddVideo",
   REQUEST_ADD_SHAPE: "canvas:requestAddShape",
+  HIGHLIGHT_SHAPE: "canvas:highlightShape",
+  CLEAR_HIGHLIGHT: "canvas:clearHighlight",
 } as const;
 
 // Event payload types
@@ -119,4 +121,41 @@ export function onCanvasAddShapeRequest(callback: (instruction: CanvasShapeInstr
   };
   window.addEventListener(CANVAS_EVENTS.REQUEST_ADD_SHAPE, handler);
   return () => window.removeEventListener(CANVAS_EVENTS.REQUEST_ADD_SHAPE, handler);
+}
+
+/**
+ * Request canvas to highlight (select + zoom to) a specific shape
+ */
+export function requestCanvasHighlightShape(shapeId: string) {
+  window.dispatchEvent(
+    new CustomEvent<string>(CANVAS_EVENTS.HIGHLIGHT_SHAPE, { detail: shapeId }),
+  );
+}
+
+/**
+ * Request canvas to clear shape highlight
+ */
+export function requestCanvasClearHighlight() {
+  window.dispatchEvent(new CustomEvent(CANVAS_EVENTS.CLEAR_HIGHLIGHT));
+}
+
+/**
+ * Subscribe to shape highlight requests
+ * @returns Unsubscribe function
+ */
+export function onCanvasHighlightShape(callback: (shapeId: string) => void) {
+  const handler = (e: Event) => {
+    callback((e as CustomEvent<string>).detail);
+  };
+  window.addEventListener(CANVAS_EVENTS.HIGHLIGHT_SHAPE, handler);
+  return () => window.removeEventListener(CANVAS_EVENTS.HIGHLIGHT_SHAPE, handler);
+}
+
+/**
+ * Subscribe to clear highlight requests
+ * @returns Unsubscribe function
+ */
+export function onCanvasClearHighlight(callback: () => void) {
+  window.addEventListener(CANVAS_EVENTS.CLEAR_HIGHLIGHT, callback);
+  return () => window.removeEventListener(CANVAS_EVENTS.CLEAR_HIGHLIGHT, callback);
 }

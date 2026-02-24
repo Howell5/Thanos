@@ -1,4 +1,4 @@
-import { type AgentMessage, subscribeAgentSSE } from "@/lib/agent-sse";
+import { type AgentMessage, type MentionedShapeContext, subscribeAgentSSE } from "@/lib/agent-sse";
 import { requestCanvasAddShape } from "@/lib/canvas-events";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -55,7 +55,7 @@ interface AgentState {
   // Actions
   setWorkspacePath: (path: string) => void;
   setProjectId: (id: string | null) => void;
-  sendMessage: (prompt: string) => void;
+  sendMessage: (prompt: string, mentionedShapes?: MentionedShapeContext[]) => void;
   stop: () => void;
   reset: () => void;
   restoreSession: (
@@ -139,7 +139,7 @@ export const useAgentStore = create<AgentState>()(
         });
       },
 
-      sendMessage: (prompt: string) => {
+      sendMessage: (prompt: string, mentionedShapes?: MentionedShapeContext[]) => {
         const { workspacePath, sessionId, projectId, _abortFn } = get();
         if (_abortFn) _abortFn();
 
@@ -168,6 +168,7 @@ export const useAgentStore = create<AgentState>()(
             workspacePath,
             ...(isResume && sessionId ? { sessionId } : {}),
             ...(projectId ? { projectId } : {}),
+            ...(mentionedShapes?.length ? { mentionedShapes } : {}),
           },
           (msg) => {
             applyMessage(msg, get, set);

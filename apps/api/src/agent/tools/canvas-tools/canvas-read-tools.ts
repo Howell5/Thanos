@@ -121,24 +121,38 @@ export function createGetShapeTool(projectId: string, userId: string) {
                 });
               }
             } else {
-              // External URL — include it so agent can reference it
-              content[0] = {
-                type: "text" as const,
-                text: JSON.stringify(
-                  {
-                    id: shape.id,
-                    type: shape.type,
-                    x: shape.x,
-                    y: shape.y,
-                    props: { w: shape.props.w, h: shape.props.h, assetId: shape.props.assetId },
-                    assetName: imageAsset.name,
-                    mimeType: imageAsset.mimeType,
-                    imageUrl: imageAsset.src,
-                  },
-                  null,
-                  2,
-                ),
-              };
+              // External URL — fetch image and return as base64 so agent can see it
+              try {
+                const imageResponse = await fetch(imageAsset.src);
+                if (imageResponse.ok) {
+                  const buffer = Buffer.from(await imageResponse.arrayBuffer());
+                  const mimeType = imageResponse.headers.get("content-type") || imageAsset.mimeType;
+                  content.push({
+                    type: "image" as const,
+                    data: buffer.toString("base64"),
+                    mimeType,
+                  });
+                }
+              } catch {
+                // Fetch failed — fall back to including URL in text metadata
+                content[0] = {
+                  type: "text" as const,
+                  text: JSON.stringify(
+                    {
+                      id: shape.id,
+                      type: shape.type,
+                      x: shape.x,
+                      y: shape.y,
+                      props: { w: shape.props.w, h: shape.props.h, assetId: shape.props.assetId },
+                      assetName: imageAsset.name,
+                      mimeType: imageAsset.mimeType,
+                      imageUrl: imageAsset.src,
+                    },
+                    null,
+                    2,
+                  ),
+                };
+              }
             }
           }
         }

@@ -9,17 +9,20 @@ import {
   useEditor,
 } from "tldraw";
 import "tldraw/tldraw.css";
-import { Button } from "@/components/ui/button";
 import { useAgentRenderer } from "@/hooks/use-agent-renderer";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import {
   type AddVideoPayload,
   onCanvasAddShapeRequest,
   onCanvasAddVideoRequest,
+  onCanvasClearHighlight,
+  onCanvasHighlightShape,
   onCanvasSaveRequest,
   requestCanvasSave,
 } from "@/lib/canvas-events";
 import { handleAddShape } from "@/lib/canvas-shape-builder";
+import { deriveShapeSummaries } from "@/lib/shape-summary";
+import { useCanvasShapeStore } from "@/stores/use-canvas-shape-store";
 import {
   DEFAULT_MAX_IMAGE_SIZE,
   type ImageMeta,
@@ -27,19 +30,13 @@ import {
   getVideoDimensions,
   isVideoFile,
 } from "@/lib/image-assets";
-import { ROUTES } from "@/lib/routes";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { selectUploadingCount, useAIStore } from "@/stores/use-ai-store";
-import { ArrowLeft, Check, Loader2, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { AgentTurnShapeUtil } from "./agent-turn-shape";
-import { FloatingToolbar } from "./floating-toolbar";
-import { GeneratingOverlay } from "./generating-overlay";
-import { InpaintingOverlay } from "./inpainting-overlay";
+import { type SaveStatus, InFrontOfTheCanvas, setCanvasPropsStore } from "./canvas-overlay";
 import { RichCardShapeUtil } from "./rich-card-shape";
-import { UploadingOverlay } from "./uploading-overlay";
 import { VIDEO_SHAPE_TYPE, VideoShapeUtil } from "./video-shape";
 
 const AUTO_SAVE_DELAY = 2000;
@@ -51,17 +48,6 @@ interface TldrawCanvasProps {
   onSave: (data: { document: unknown; session: unknown }) => Promise<void>;
   isSaving: boolean;
 }
-
-// Save status for UI feedback
-type SaveStatus = "idle" | "saving" | "saved";
-
-// Store for passing props to InFrontOfTheCanvas
-let canvasPropsStore: {
-  projectName: string;
-  onSave: () => void;
-  isSaving: boolean;
-  saveStatus: SaveStatus;
-} | null = null;
 
 // Component to handle keyboard shortcuts and upload cleanup
 function CanvasEventHandler() {
@@ -110,61 +96,33 @@ function CanvasEventHandler() {
     requestCanvasSave();
   }), [editor]);
 
-  return null;
-}
+  // Sync live shape list to useCanvasShapeStore
+  useEffect(() => {
+    const syncShapes = () => {
+      useCanvasShapeStore.getState().setShapes(deriveShapeSummaries(editor));
+    };
+    syncShapes();
+    return editor.store.listen(syncShapes, { source: "all", scope: "document" });
+  }, [editor]);
 
-// Component rendered in front of the canvas (highest z-index)
-function InFrontOfTheCanvas() {
-  const props = canvasPropsStore;
-  return (
-    <>
-      <FloatingToolbar />
-      <GeneratingOverlay />
-      <InpaintingOverlay />
-      <UploadingOverlay />
-      {/* Top Bar — pointer-events-auto needed because tldraw's InFrontOfTheCanvas has pointer-events: none */}
-      <div className="pointer-events-auto fixed left-4 top-4 z-[300] flex items-center gap-2">
-        <Button
-          asChild
-          variant="outline"
-          size="sm"
-          className="border-gray-200 bg-white shadow-sm hover:bg-gray-50"
-        >
-          <Link to={ROUTES.PROJECTS}>
-            <ArrowLeft className="mr-1.5 h-4 w-4" />
-            返回
-          </Link>
-        </Button>
-        <div className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium shadow-sm">
-          {props?.projectName}
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={props?.onSave}
-          disabled={props?.isSaving || props?.saveStatus === "saving"}
-          className="border-gray-200 bg-white shadow-sm hover:bg-gray-50"
-        >
-          {props?.saveStatus === "saving" ? (
-            <>
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              保存中
-            </>
-          ) : props?.saveStatus === "saved" ? (
-            <>
-              <Check className="mr-1.5 h-4 w-4 text-green-600" />
-              已保存
-            </>
-          ) : (
-            <>
-              <Save className="mr-1.5 h-4 w-4" />
-              保存
-            </>
-          )}
-        </Button>
-      </div>
-    </>
-  );
+  // Handle shape highlight from mention picker hover
+  useEffect(() => {
+    return onCanvasHighlightShape((shapeId) => {
+      const shape = editor.getShape(shapeId as Parameters<typeof editor.getShape>[0]);
+      if (shape) {
+        editor.select(shape.id);
+        editor.zoomToSelection({ animation: { duration: 200 } });
+      }
+    });
+  }, [editor]);
+
+  useEffect(() => {
+    return onCanvasClearHighlight(() => {
+      editor.selectNone();
+    });
+  }, [editor]);
+
+  return null;
 }
 
 function VerticalToolbar() {
@@ -474,12 +432,12 @@ export function TldrawCanvas({
   );
 
   // Update props store for InFrontOfTheCanvas
-  canvasPropsStore = {
+  setCanvasPropsStore({
     projectName,
     onSave: handleSave,
     isSaving,
     saveStatus,
-  };
+  });
 
   return (
     <div className="relative h-full w-full" onDropCapture={handleDropCapture}>

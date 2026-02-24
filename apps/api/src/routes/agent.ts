@@ -13,13 +13,93 @@ import {
 import { getSessionOrMock } from "../lib/mock-session";
 import { errors } from "../lib/response";
 
+// ─── System Prompt ───────────────────────────────────────────
+
+function buildSystemPrompt(hasCanvasTools: boolean): string {
+  const lines = [
+    `You are a creative co-creator inside Thanos, a canvas-based multimodal creation platform.`,
+    `The user works on a visual canvas (powered by tldraw) where they arrange videos, images, text, and other media.`,
+    `Your job is to collaborate with them — understanding their intent, manipulating canvas content, and producing creative output.`,
+    ``,
+    `## Communication`,
+    `- Respond in the same language the user writes in.`,
+    `- Be concise — the UI renders your text in a small chat panel.`,
+    `- When presenting results, prefer adding shapes to the canvas over long text replies.`,
+  ];
+
+  if (hasCanvasTools) {
+    lines.push(
+      ``,
+      `## Available Canvas Tools`,
+      ``,
+      `### Read`,
+      `- **list_shapes**: List all shapes on the canvas (images, videos, text, etc.) with position and dimensions.`,
+      `- **get_shape**: Get full details of a shape by ID. For images, returns the actual image content.`,
+      ``,
+      `### Write`,
+      `- **add_shape**: Add a text, image, video, file, or audio shape to the canvas.`,
+      ``,
+      `### Video`,
+      `- **list_project_videos**: List all videos in the project with analysis status and clip counts.`,
+      `- **get_video_clips**: Get detailed clip breakdown for a specific video.`,
+      `- **search_video_clips**: Semantic search across all analyzed clips using natural language.`,
+      `- **analyze_video**: Run AI analysis on a video to extract clip segments (blocks until done).`,
+      `- **create_editing_plan**: Assemble selected clips into an editing plan with voiceover, text overlays, transitions, and audio config.`,
+      `- **render_video**: Render a video from an editing plan (blocks until done, returns output URL).`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
+const mentionedShapeSchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  brief: z.string(),
+  thumbnailUrl: z.string().nullable(),
+});
+
 // Request schema
 const runAgentSchema = z.object({
   prompt: z.string().min(1),
   workspacePath: z.string().min(1),
   sessionId: z.string().optional(),
   projectId: z.string().uuid().optional().describe("Project ID for canvas tools access"),
+  mentionedShapes: z.array(mentionedShapeSchema).optional(),
 });
+
+/**
+ * Prepend shape context to the user prompt when shapes are mentioned via @.
+ * For image shapes, instructs the agent to call get_shape to see the actual image.
+ */
+function buildPromptWithShapeContext(
+  prompt: string,
+  shapes: z.infer<typeof mentionedShapeSchema>[],
+): string {
+  const contextLines: string[] = [];
+  const imageShapeIds: string[] = [];
+
+  for (const s of shapes) {
+    contextLines.push(`- ${s.id} (${s.type}): ${s.brief}`);
+    if (s.type === "image") {
+      imageShapeIds.push(s.id);
+    }
+  }
+
+  const parts = [
+    `The user is referring to these canvas shapes:`,
+    contextLines.join("\n"),
+  ];
+
+  if (imageShapeIds.length > 0) {
+    parts.push(
+      `\nIMPORTANT: The user mentioned ${imageShapeIds.length} image shape(s). You MUST call get_shape for each image shape to see the actual image content before responding. Shape IDs: ${imageShapeIds.join(", ")}`,
+    );
+  }
+
+  parts.push("", prompt);
+  return parts.join("\n");
+}
 
 /**
  * Message-based event model.
@@ -51,8 +131,13 @@ const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), a
     return errors.unauthorized(c);
   }
 
-  const { prompt, workspacePath, sessionId, projectId } = c.req.valid("json");
+  const { prompt: rawPrompt, workspacePath, sessionId, projectId, mentionedShapes } = c.req.valid("json");
   const userId = session.user.id;
+
+  // Build prompt — use multimodal content blocks when image shapes are mentioned
+  const prompt = mentionedShapes?.length
+    ? buildPromptWithShapeContext(rawPrompt, mentionedShapes)
+    : rawPrompt;
 
   // Ensure workspace directory exists (guard against stale paths from client)
   if (!existsSync(workspacePath)) {
@@ -81,9 +166,12 @@ const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), a
         allowedTools.push(...CANVAS_TOOL_NAMES);
       }
 
+      const hasCanvasTools = Object.keys(mcpServers).length > 0;
+
       const queryResult = query({
         prompt,
         options: {
+          systemPrompt: buildSystemPrompt(hasCanvasTools),
           cwd: workspacePath,
           // Use full path to node binary so the SDK can find it regardless of
           // how the server was started (nvm, volta, etc.)
@@ -98,7 +186,7 @@ const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), a
           maxTurns: 30,
           includePartialMessages: true,
           ...(sessionId ? { resume: sessionId } : {}),
-          ...(Object.keys(mcpServers).length > 0
+          ...(hasCanvasTools
             ? { mcpServers, allowedTools: [...allowedTools] }
             : {}),
         },

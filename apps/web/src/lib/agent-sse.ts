@@ -26,11 +26,19 @@ export type AgentMessage =
   | { type: "result"; cost: number; inputTokens: number; outputTokens: number }
   | { type: "error"; message: string };
 
+export interface MentionedShapeContext {
+  id: string;
+  type: string;
+  brief: string;
+  thumbnailUrl: string | null;
+}
+
 export interface AgentRunParams {
   prompt: string;
   workspacePath: string;
   sessionId?: string;
-  projectId?: string; // For video tools access
+  projectId?: string;
+  mentionedShapes?: MentionedShapeContext[];
 }
 
 /**
