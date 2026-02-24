@@ -159,6 +159,8 @@ export function ToolSegmentView({
   output?: string;
   completed: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
+
   if (tool === "AskUserQuestion") {
     return <AskUserQuestionView input={input} />;
   }
@@ -167,9 +169,15 @@ export function ToolSegmentView({
     typeof input === "string" ? input.slice(0, 80) : (JSON.stringify(input)?.slice(0, 80) ?? "");
   const videoUrl = extractVideoUrlFromToolOutput(output);
 
+  const hasDetails = input != null || output != null;
+
   return (
     <div>
-      <div className="flex items-start gap-1.5 py-0.5">
+      <button
+        type="button"
+        className="flex w-full items-start gap-1.5 py-0.5 text-left"
+        onClick={() => hasDetails && setExpanded((v) => !v)}
+      >
         <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
           {completed ? (
             <span className="text-[10px] text-green-500">&#10003;</span>
@@ -179,12 +187,41 @@ export function ToolSegmentView({
         </span>
         <div className="min-w-0 flex-1">
           <span className="text-[11px] font-medium text-slate-700">{tool}</span>
-          {inputPreview && <p className="truncate text-[10px] text-slate-400">{inputPreview}</p>}
+          {!expanded && inputPreview && (
+            <p className="truncate text-[10px] text-slate-400">{inputPreview}</p>
+          )}
         </div>
-      </div>
+        {hasDetails && (
+          <span className="mt-0.5 shrink-0 text-[10px] text-slate-400">
+            {expanded ? "▼" : "▶"}
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div className="ml-5.5 mt-0.5 space-y-1 pl-[22px]">
+          {input != null && (
+            <pre className="overflow-x-auto rounded bg-slate-100 p-1.5 text-[10px] leading-relaxed text-slate-600">
+              {typeof input === "string" ? input : JSON.stringify(input, null, 2)}
+            </pre>
+          )}
+          {output != null && (
+            <pre className="overflow-x-auto rounded bg-green-50 p-1.5 text-[10px] leading-relaxed text-slate-600">
+              {formatToolOutput(output)}
+            </pre>
+          )}
+        </div>
+      )}
       {videoUrl && <VideoResultCard url={videoUrl} />}
     </div>
   );
+}
+
+function formatToolOutput(output: string): string {
+  try {
+    return JSON.stringify(JSON.parse(output), null, 2);
+  } catch {
+    return output;
+  }
 }
 
 // ─── Segment List ───────────────────────────────────────────
