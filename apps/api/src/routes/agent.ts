@@ -168,6 +168,9 @@ const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), a
 
       const hasCanvasTools = Object.keys(mcpServers).length > 0;
 
+      // Always include Skill tool + Bash for skills that use shell scripts
+      allowedTools.push("Skill", "Bash", "Read", "Write");
+
       const queryResult = query({
         prompt,
         options: {
@@ -177,6 +180,7 @@ const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), a
           // how the server was started (nvm, volta, etc.)
           executable: process.execPath as "node",
           env: { ...process.env },
+          settingSources: ["project"],
           sandbox: {
             enabled: true,
             autoAllowBashIfSandboxed: true,
@@ -185,10 +189,9 @@ const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), a
           permissionMode: "acceptEdits",
           maxTurns: 30,
           includePartialMessages: true,
+          allowedTools,
           ...(sessionId ? { resume: sessionId } : {}),
-          ...(hasCanvasTools
-            ? { mcpServers, allowedTools: [...allowedTools] }
-            : {}),
+          ...(hasCanvasTools ? { mcpServers } : {}),
         },
       });
 
