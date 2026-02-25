@@ -1,33 +1,28 @@
 /**
- * Canvas generate_image tool
+ * Canvas generate_image tool (batch-capable)
  *
- * Generates an image using Gemini Vertex AI (Nano Banana Pro),
+ * Generates images using Gemini or Seedream v5 (fal.ai),
  * uploads to R2, records in DB, deducts credits, and emits
- * an add_shape event to place the image on the canvas.
+ * add_shape events to place images on the canvas.
  */
 
-import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { tool } from "@anthropic-ai/claude-agent-sdk";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../../db";
-import {
-  aiImages,
-  aiUsageHistory,
-  projects,
-  shapeMetadata,
-  user,
-} from "../../../db/schema";
-import {
-  type GenerateImageParams,
-  generateAIImage,
-  isGeminiConfigured,
-} from "../../../lib/gemini-ai";
+import { aiImages, aiUsageHistory, projects, shapeMetadata, user } from "../../../db/schema";
 import { deleteFromR2, generateImageKey, uploadToR2 } from "../../../lib/r2";
-import type { CanvasToolsEmitter } from "./canvas-write-tools";
 import { loadProjectStore } from "./canvas-helpers";
-
-const DEFAULT_MODEL = "gemini-3-pro-image-preview";
+import type { CanvasToolsEmitter } from "./canvas-write-tools";
+import {
+  GEMINI_PRO_MODEL,
+  estimateCreditsForModel,
+  generateWithProvider,
+  getProviderName,
+  isModelAvailable,
+  isSeedreamModel,
+} from "./image-provider";
 
 const VALID_ASPECT_RATIOS = [
   "1:1",
@@ -42,6 +37,27 @@ const VALID_ASPECT_RATIOS = [
   "21:9",
 ] as const;
 
+const taskSchema = z.object({
+  prompt: z.string().min(1).describe("Text description of the image to generate"),
+  negativePrompt: z.string().optional().describe("Things to avoid"),
+  aspectRatio: z.enum(VALID_ASPECT_RATIOS).default("1:1").describe("Aspect ratio"),
+  imageSize: z.enum(["1K", "2K", "4K"]).default("1K").describe("Resolution (Pro model only)"),
+  model: z
+    .string()
+    .optional()
+    .describe(
+      "Model ID. Options: gemini-2.5-flash-image (default, 50cr), gemini-3-pro-image-preview (100cr), seedream-v5 (40cr, fal.ai).",
+    ),
+  numberOfImages: z.number().min(1).max(4).default(1).describe("Images per task (1-4)"),
+  referenceShapeIds: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Shape IDs of canvas images to use as visual context. The model sees these images and follows the prompt to produce new output.",
+    ),
+  summary: z.string().max(200).optional().describe("Short human-readable context summary"),
+});
+
 export function createGenerateImageTool(
   projectId: string,
   userId: string,
@@ -49,72 +65,18 @@ export function createGenerateImageTool(
 ) {
   return tool(
     "generate_image",
-    `Generate an image using AI and add it to the canvas. Use this when the user explicitly asks to generate or create an image — not as a default way to "respond" or "present information".
+    `Generate images using AI and place them on the canvas. Batch-capable: 1-8 independent tasks.
 
-The image is generated, uploaded to persistent storage, and placed on the canvas automatically.
+- Provide only a prompt for text-to-image generation.
+- Provide referenceShapeIds to give the model visual context — it sees the referenced canvas images alongside your prompt. Works for style transfer, editing, combining elements, background removal, etc.
 
-Modes:
-- **Text-to-image**: provide only a prompt.
-- **Reference-based generation**: provide one or more referenceShapeIds from the canvas. The model sees all reference images and follows the prompt to produce a new image (e.g. style transfer, combining elements from multiple references).
-- **Image editing**: provide the shape to edit as a referenceShapeId and describe the desired changes in the prompt (e.g. "remove the background", "change the sky to sunset").
-
-Keep referenceShapeIds to 10 or fewer for best results.`,
+Models: gemini-2.5-flash-image (50cr), gemini-3-pro-image-preview (100cr, default), seedream-v5 (40cr, fal.ai).
+Each task can produce 1-4 images. All tasks run in parallel.`,
     {
-      prompt: z
-        .string()
-        .min(1)
-        .describe(
-          "Text description of the image to generate, or editing instructions when using references",
-        ),
-      negativePrompt: z
-        .string()
-        .optional()
-        .describe("Things to avoid in the generated image"),
-      aspectRatio: z
-        .enum(VALID_ASPECT_RATIOS)
-        .default("1:1")
-        .describe("Aspect ratio of the generated image"),
-      imageSize: z
-        .enum(["1K", "2K", "4K"])
-        .default("1K")
-        .describe(
-          "Output resolution (Pro model only; Flash always outputs 1K). 1K (1024px), 2K (2048px), 4K (4096px). 4K costs ~80% more for Pro model.",
-        ),
-      model: z
-        .string()
-        .optional()
-        .describe(
-          "Gemini model ID. Default: gemini-2.5-flash-image. Use gemini-3-pro-image-preview for higher quality (costs more).",
-        ),
-      referenceShapeIds: z
-        .array(z.string())
-        .optional()
-        .describe(
-          "Shape IDs of existing canvas images to use as references. For editing, pass the single image to edit. For style transfer or combining, pass multiple.",
-        ),
-      summary: z
-        .string()
-        .max(200)
-        .optional()
-        .describe(
-          "A short human-readable summary describing why this image was generated and its context (e.g. 'product hero shot requested by user', 'edited version with background removed'). Do NOT repeat the prompt — describe the creation context instead.",
-        ),
+      tasks: z.array(taskSchema).min(1).max(8).describe("Array of generation tasks"),
     },
     async (args) => {
       try {
-        // Check configuration
-        if (!isGeminiConfigured()) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: "AI image generation is not configured. GOOGLE_VERTEX_PROJECT is missing.",
-              },
-            ],
-            isError: true,
-          };
-        }
-
         // Verify project ownership
         const project = await db.query.projects.findFirst({
           where: and(eq(projects.id, projectId), eq(projects.userId, userId)),
@@ -122,214 +84,86 @@ Keep referenceShapeIds to 10 or fewer for best results.`,
         });
         if (!project) {
           return {
-            content: [
-              {
-                type: "text" as const,
-                text: "Project not found or access denied",
-              },
-            ],
+            content: [{ type: "text" as const, text: "Project not found or access denied" }],
             isError: true,
           };
         }
 
-        // Pre-check credits (non-authoritative, just a fast-fail)
-        const usedModel = args.model || DEFAULT_MODEL;
-        const isProModel = usedModel.includes("pro");
-        let creditsPerImage = isProModel ? 100 : 50;
-        if (isProModel && args.imageSize === "4K") {
-          creditsPerImage = Math.round(creditsPerImage * 1.8);
-        }
-
-        const userRecord = await db.query.user.findFirst({
-          where: eq(user.id, userId),
-          columns: { credits: true },
-        });
-        if (!userRecord || userRecord.credits < creditsPerImage) {
+        // Expand tasks and compute total credits
+        const expanded = args.tasks.map((t) => {
+          const model = t.model || GEMINI_PRO_MODEL;
+          const cost = estimateCreditsForModel(model, t.imageSize) * t.numberOfImages;
           return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Insufficient credits. Required: ${creditsPerImage}, available: ${userRecord?.credits ?? 0}. Ask the user to purchase more credits.`,
-              },
-            ],
-            isError: true,
+            ...t,
+            model,
+            costPerImage: estimateCreditsForModel(model, t.imageSize),
+            totalCost: cost,
           };
-        }
-
-        // Build generation params
-        const genParams: GenerateImageParams = {
-          prompt: args.prompt,
-          negativePrompt: args.negativePrompt,
-          model: usedModel,
-          aspectRatio: args.aspectRatio,
-          imageSize: args.imageSize,
-          numberOfImages: 1,
-        };
-
-        // Fetch reference images from canvas shapes
-        if (args.referenceShapeIds?.length) {
-          const refImages = await fetchShapeImages(
-            projectId,
-            userId,
-            args.referenceShapeIds,
-          );
-          if (refImages.length > 0) {
-            genParams.referenceImages = refImages;
-          }
-        }
-
-        // Generate the image
-        const result = await generateAIImage(genParams);
-
-        // Upload to R2
-        const imageKey = generateImageKey(userId, projectId);
-        const upload = await uploadToR2({
-          key: imageKey,
-          data: result.imageData,
-          contentType: result.mimeType,
-          metadata: { userId, projectId },
         });
+        const totalCredits = expanded.reduce((sum, t) => sum + t.totalCost, 0);
 
-        // Pre-generate a tldraw-compatible shape ID so we can write shapeMetadata in the same tx
-        const tldrawId = randomUUID().replace(/-/g, "").slice(0, 12);
-        const fullShapeId = `shape:${tldrawId}`;
-
-        // Build description from context summary (not the raw prompt)
-        const refCount = genParams.referenceImages?.length ?? 0;
-        const contextLabel = args.summary || "AI-generated image";
-        const description =
-          refCount > 0
-            ? `${contextLabel} (${usedModel}, ${refCount} ref)`
-            : `${contextLabel} (${usedModel})`;
-
-        // Record in DB + atomically deduct credits + write shapeMetadata
-        let imageRecord: typeof aiImages.$inferSelect;
-        let creditsRemaining: number;
-        try {
-          const txResult = await db.transaction(async (tx) => {
-            // Atomic conditional decrement — fails if credits insufficient
-            const [updated] = await tx
-              .update(user)
-              .set({ credits: sql`${user.credits} - ${creditsPerImage}` })
-              .where(
-                and(eq(user.id, userId), gte(user.credits, creditsPerImage)),
-              )
-              .returning({ credits: user.credits });
-
-            if (!updated) {
-              throw new Error("INSUFFICIENT_CREDITS");
-            }
-
-            const [record] = await tx
-              .insert(aiImages)
-              .values({
-                projectId,
-                userId,
-                prompt: args.prompt,
-                negativePrompt: args.negativePrompt,
-                model: usedModel,
-                aspectRatio: args.aspectRatio || "1:1",
-                imageSize: args.imageSize || "1K",
-                r2Key: imageKey,
-                r2Url: upload.url,
-                width: result.width,
-                height: result.height,
-                fileSize: upload.size,
-                mimeType: result.mimeType,
-                creditsUsed: creditsPerImage,
-                status: "completed",
-              })
-              .returning();
-
-            await tx.insert(aiUsageHistory).values({
-              userId,
-              projectId,
-              imageId: record.id,
-              operation: genParams.referenceImages
-                ? "image-to-image"
-                : "text-to-image",
-              model: usedModel,
-              provider: "gemini",
-              creditsCharged: creditsPerImage,
-              durationMs: result.durationMs,
-              success: true,
-            });
-
-            // Write shape description immediately — no async AI describe needed
-            await tx.insert(shapeMetadata).values({
-              projectId,
-              userId,
-              shapeId: fullShapeId,
-              mediaType: "image",
-              originalFileName: `generated-${tldrawId}.png`,
-              description,
-              status: "done",
-              model: usedModel,
-              completedAt: new Date(),
-            });
-
-            return { record, creditsRemaining: updated.credits };
-          });
-
-          imageRecord = txResult.record;
-          creditsRemaining = txResult.creditsRemaining;
-        } catch (txError) {
-          // Clean up orphaned R2 object on DB failure
-          await deleteFromR2(imageKey).catch(() => {});
-
-          if (
-            txError instanceof Error &&
-            txError.message === "INSUFFICIENT_CREDITS"
-          ) {
+        // Check model availability
+        for (const t of expanded) {
+          if (!isModelAvailable(t.model)) {
             return {
               content: [
                 {
                   type: "text" as const,
-                  text: `Insufficient credits (race condition detected). Ask the user to purchase more credits.`,
+                  text: `Model ${t.model} is not configured. Check API keys.`,
                 },
               ],
               isError: true,
             };
           }
-          throw txError;
         }
 
-        // Emit add_shape event — frontend uses the pre-assigned shapeId
-        emitter.emit("add_shape", {
-          shapeType: "image" as const,
-          url: upload.url,
-          width: result.width,
-          height: result.height,
-          altText: args.prompt,
-          description,
-          shapeId: tldrawId,
-        });
+        // Generate a group ID for batch placement
+        const groupId =
+          expanded.length > 1 || expanded.some((t) => t.numberOfImages > 1)
+            ? randomUUID().slice(0, 8)
+            : undefined;
+
+        // Run all tasks in parallel
+        const taskResults = await Promise.allSettled(
+          expanded.map((t) => runSingleGenTask(projectId, userId, t, emitter, groupId)),
+        );
+
+        // Collect results
+        let successCount = 0;
+        let actualCredits = 0;
+        const outputs: string[] = [];
+
+        for (let i = 0; i < taskResults.length; i++) {
+          const r = taskResults[i];
+          if (r.status === "fulfilled") {
+            successCount += r.value.imageCount;
+            actualCredits += r.value.creditsUsed;
+            outputs.push(`Task ${i + 1}: ${r.value.imageCount} image(s) generated`);
+          } else {
+            outputs.push(`Task ${i + 1}: FAILED — ${r.reason?.message || r.reason}`);
+          }
+        }
 
         return {
           content: [
             {
               type: "text" as const,
               text: JSON.stringify({
-                success: true,
-                imageUrl: upload.url,
-                imageId: imageRecord.id,
-                width: result.width,
-                height: result.height,
-                model: usedModel,
-                durationMs: result.durationMs,
-                creditsUsed: creditsPerImage,
-                creditsRemaining,
-                addedToCanvas: true,
+                success: successCount > 0,
+                totalImages: successCount,
+                totalCreditsUsed: actualCredits,
+                tasks: outputs,
               }),
             },
           ],
+          ...(successCount === 0 ? { isError: true } : {}),
         };
       } catch (error) {
         return {
           content: [
             {
               type: "text" as const,
-              text: `Image generation failed: ${error instanceof Error ? error.message : String(error)}`,
+              text: `Generation failed: ${error instanceof Error ? error.message : String(error)}`,
             },
           ],
           isError: true,
@@ -339,49 +173,235 @@ Keep referenceShapeIds to 10 or fewer for best results.`,
   );
 }
 
-/**
- * Fetch multiple images from canvas shapes as base64 strings.
- * Loads the project store once, then fetches all image URLs in parallel.
- */
-async function fetchShapeImages(
+interface TaskInput {
+  prompt: string;
+  negativePrompt?: string;
+  aspectRatio: string;
+  imageSize: string;
+  model: string;
+  numberOfImages: number;
+  referenceShapeIds?: string[];
+  summary?: string;
+  costPerImage: number;
+  totalCost: number;
+}
+
+interface TaskOutput {
+  imageCount: number;
+  creditsUsed: number;
+}
+
+async function runSingleGenTask(
+  projectId: string,
+  userId: string,
+  task: TaskInput,
+  emitter: CanvasToolsEmitter,
+  groupId?: string,
+): Promise<TaskOutput> {
+  // Fetch reference images if needed (both base64 for Gemini and URLs for Seedream)
+  let refs: ResolvedRefs | undefined;
+  if (task.referenceShapeIds?.length) {
+    refs = await resolveShapeImages(projectId, userId, task.referenceShapeIds);
+  }
+
+  // Generate images — provider handles reference routing internally
+  const baseReq = {
+    prompt: task.prompt,
+    negativePrompt: task.negativePrompt,
+    model: task.model,
+    aspectRatio: task.aspectRatio,
+    referenceImages: refs?.base64Images,
+    referenceImageUrls: refs?.urls.length ? refs.urls : undefined,
+  };
+
+  type ImageResult = Array<{
+    imageData: Buffer;
+    width: number;
+    height: number;
+    mimeType: string;
+    durationMs: number;
+  }>;
+  let results: ImageResult;
+
+  if (isSeedreamModel(task.model) && !refs?.urls.length) {
+    // Seedream t2i: supports batch natively
+    results = await generateWithProvider({
+      ...baseReq,
+      numberOfImages: task.numberOfImages,
+    });
+  } else if (isSeedreamModel(task.model) && refs?.urls.length) {
+    // Seedream with reference: edit endpoint, one image per call
+    const promises = Array.from({ length: task.numberOfImages }, () =>
+      generateWithProvider({ ...baseReq, numberOfImages: 1 }),
+    );
+    const settled = await Promise.allSettled(promises);
+    results = settled
+      .filter((r): r is PromiseFulfilledResult<ImageResult> => r.status === "fulfilled")
+      .flatMap((r) => r.value);
+  } else {
+    // Gemini: parallel single-image calls
+    const promises = Array.from({ length: task.numberOfImages }, () =>
+      generateWithProvider({
+        ...baseReq,
+        imageSize: task.imageSize as "1K" | "2K" | "4K",
+        numberOfImages: 1,
+      }),
+    );
+    const settled = await Promise.allSettled(promises);
+    results = settled
+      .filter((r): r is PromiseFulfilledResult<ImageResult> => r.status === "fulfilled")
+      .flatMap((r) => r.value);
+  }
+
+  if (results.length === 0) throw new Error("No images generated");
+
+  // Upload all to R2
+  const uploads = await Promise.all(
+    results.map(async (img) => {
+      const key = generateImageKey(userId, projectId);
+      const upload = await uploadToR2({
+        key,
+        data: img.imageData,
+        contentType: img.mimeType,
+        metadata: { userId, projectId },
+      });
+      return { key, upload, img };
+    }),
+  );
+
+  // Atomic DB transaction: deduct credits + insert records
+  const creditsNeeded = task.costPerImage * results.length;
+  const contextLabel = task.summary || "AI-generated image";
+  const hasRefs = !!refs?.base64Images?.length || !!refs?.urls.length;
+  const refCount = Math.max(refs?.base64Images?.length ?? 0, refs?.urls.length ?? 0);
+  const provider = getProviderName(task.model);
+  const operation = hasRefs ? "image-to-image" : "text-to-image";
+  // When references used, anchor results near the first reference shape
+  const anchorShapeId = hasRefs ? task.referenceShapeIds?.[0] : undefined;
+
+  try {
+    await db.transaction(async (tx) => {
+      for (const { key, upload, img } of uploads) {
+        const tldrawId = randomUUID().replace(/-/g, "").slice(0, 12);
+        const fullShapeId = `shape:${tldrawId}`;
+        const description =
+          refCount > 0
+            ? `${contextLabel} (${task.model}, ${refCount} ref)`
+            : `${contextLabel} (${task.model})`;
+
+        const [record] = await tx
+          .insert(aiImages)
+          .values({
+            projectId,
+            userId,
+            prompt: task.prompt,
+            negativePrompt: task.negativePrompt,
+            model: task.model,
+            aspectRatio: task.aspectRatio,
+            imageSize: task.imageSize,
+            r2Key: key,
+            r2Url: upload.url,
+            width: img.width,
+            height: img.height,
+            fileSize: upload.size,
+            mimeType: img.mimeType,
+            creditsUsed: task.costPerImage,
+            status: "completed",
+          })
+          .returning();
+
+        await tx.insert(aiUsageHistory).values({
+          userId,
+          projectId,
+          imageId: record.id,
+          operation,
+          model: task.model,
+          provider,
+          creditsCharged: task.costPerImage,
+          durationMs: img.durationMs,
+          success: true,
+        });
+
+        await tx.insert(shapeMetadata).values({
+          projectId,
+          userId,
+          shapeId: fullShapeId,
+          mediaType: "image",
+          originalFileName: `generated-${tldrawId}.png`,
+          description,
+          status: "done",
+          model: task.model,
+          completedAt: new Date(),
+        });
+
+        const hint =
+          groupId || anchorShapeId
+            ? {
+                ...(groupId ? { group: groupId } : {}),
+                ...(anchorShapeId ? { referenceShapeId: anchorShapeId } : {}),
+              }
+            : undefined;
+        emitter.emit("add_shape", {
+          shapeType: "image" as const,
+          url: upload.url,
+          width: img.width,
+          height: img.height,
+          altText: task.prompt,
+          description,
+          shapeId: tldrawId,
+          placementHint: hint,
+        });
+      }
+    });
+  } catch (txError) {
+    // Clean up orphaned R2 objects
+    await Promise.all(uploads.map(({ key }) => deleteFromR2(key).catch(() => {})));
+    throw txError;
+  }
+
+  return { imageCount: results.length, creditsUsed: creditsNeeded };
+}
+
+/** Resolved reference images — base64 for Gemini, URLs for Seedream */
+interface ResolvedRefs {
+  base64Images: string[];
+  /** URLs of reference images (for Seedream edit endpoint, up to 10) */
+  urls: string[];
+}
+
+/** Resolve canvas shapes to both base64 data and URLs */
+async function resolveShapeImages(
   projectId: string,
   userId: string,
   shapeIds: string[],
-): Promise<string[]> {
+): Promise<ResolvedRefs> {
   try {
     const { shapes, assets } = await loadProjectStore(projectId, userId);
-
-    // Resolve each shapeId to an image URL
     const urls: string[] = [];
     for (const shapeId of shapeIds) {
-      const shape = shapes.find(
-        (s) => s.id === shapeId || s.id === `shape:${shapeId}`,
-      );
+      const shape = shapes.find((s) => s.id === shapeId || s.id === `shape:${shapeId}`);
       if (!shape || shape.type !== "image") continue;
-
       const assetId = (shape.props as { assetId?: string })?.assetId;
       if (!assetId) continue;
-
       const asset = assets.get(assetId) ?? assets.get(`asset:${assetId}`);
       if (asset?.props.src) urls.push(asset.props.src);
     }
-
-    // Fetch all in parallel
-    const results = await Promise.all(
+    const fetched = await Promise.all(
       urls.map(async (url) => {
         try {
           const res = await fetch(url);
           if (!res.ok) return null;
-          const buf = Buffer.from(await res.arrayBuffer());
-          return buf.toString("base64");
+          return Buffer.from(await res.arrayBuffer()).toString("base64");
         } catch {
           return null;
         }
       }),
     );
-
-    return results.filter((r): r is string => r !== null);
+    return {
+      base64Images: fetched.filter((r): r is string => r !== null),
+      urls,
+    };
   } catch {
-    return [];
+    return { base64Images: [], urls: [] };
   }
 }

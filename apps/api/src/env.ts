@@ -37,6 +37,8 @@ const envSchema = z.object({
   VOLCENGINE_TTS_ACCESS_TOKEN: z.string().optional(),
   // Kimi K2.5 API (for media description)
   KIMI_API_KEY: z.string().optional(),
+  // fal.ai API key (for Seedream v5 image generation)
+  FAL_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

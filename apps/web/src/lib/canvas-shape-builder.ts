@@ -3,12 +3,53 @@
  * Pure function — no React, no hooks.
  */
 
+import { RICH_CARD_SHAPE_TYPE } from "@/components/canvas/rich-card-shape";
+import { VIDEO_SHAPE_TYPE } from "@/components/canvas/video-shape";
 import type { CanvasShapeInstruction } from "@repo/shared";
 import type { Editor, TLShapeId } from "tldraw";
 import { AssetRecordType, createShapeId } from "tldraw";
-import { RICH_CARD_SHAPE_TYPE } from "@/components/canvas/rich-card-shape";
-import { VIDEO_SHAPE_TYPE } from "@/components/canvas/video-shape";
 import { findNonOverlappingPosition } from "./canvas-position";
+
+// ─── Batch placement tracking ────────────────────────────────
+// Tracks recently placed shapes per group for row-layout placement.
+// Entries expire after 30 seconds to avoid stale anchors.
+
+interface GroupEntry {
+  shapeIds: TLShapeId[];
+  timestamp: number;
+}
+
+const groupPlacedShapes = new Map<string, GroupEntry>();
+const GROUP_TTL_MS = 30_000;
+
+function cleanStaleGroups() {
+  const now = Date.now();
+  for (const [key, entry] of groupPlacedShapes) {
+    if (now - entry.timestamp > GROUP_TTL_MS) {
+      groupPlacedShapes.delete(key);
+    }
+  }
+}
+
+function getGroupSiblings(groupId: string): TLShapeId[] {
+  const entry = groupPlacedShapes.get(groupId);
+  if (!entry) return [];
+  if (Date.now() - entry.timestamp > GROUP_TTL_MS) {
+    groupPlacedShapes.delete(groupId);
+    return [];
+  }
+  return entry.shapeIds;
+}
+
+function trackGroupShape(groupId: string, shapeId: TLShapeId) {
+  const entry = groupPlacedShapes.get(groupId);
+  if (entry) {
+    entry.shapeIds.push(shapeId);
+    entry.timestamp = Date.now();
+  } else {
+    groupPlacedShapes.set(groupId, { shapeIds: [shapeId], timestamp: Date.now() });
+  }
+}
 
 /**
  * Create a tldraw shape on the canvas from an agent instruction.
@@ -18,6 +59,7 @@ export function handleAddShape(
   editor: Editor,
   instruction: CanvasShapeInstruction,
 ): TLShapeId | null {
+  cleanStaleGroups();
   switch (instruction.shapeType) {
     case "text":
       return addTextShape(editor, instruction);
@@ -82,8 +124,34 @@ function addImageShape(
 ): TLShapeId {
   const w = instruction.width ?? 320;
   const h = instruction.height ?? 320;
-  const pos = getAutoPosition(editor, w, h);
   const shapeId = instruction.shapeId ? createShapeId(instruction.shapeId) : createShapeId();
+  const hint = instruction.placementHint;
+
+  // Determine anchor shape IDs for placement
+  let anchorIds: string[] = [];
+  if (hint?.referenceShapeId) {
+    // Edit mode: anchor near the reference image
+    anchorIds = [hint.referenceShapeId];
+    // Also include group siblings if any
+    if (hint.group) {
+      const siblings = getGroupSiblings(hint.group);
+      anchorIds = [...anchorIds, ...siblings.map(String)];
+    }
+  } else if (hint?.group) {
+    // Batch generation: anchor near previous group siblings for row layout
+    anchorIds = getGroupSiblings(hint.group).map(String);
+  }
+
+  const pos =
+    anchorIds.length > 0
+      ? findNonOverlappingPosition(editor, anchorIds, w, h)
+      : getAutoPosition(editor, w, h);
+
+  // Track in group if applicable
+  if (hint?.group) {
+    trackGroupShape(hint.group, shapeId);
+  }
+
   const assetId = AssetRecordType.createId();
 
   editor.createAssets([

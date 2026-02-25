@@ -23,6 +23,15 @@ export const canvasShapeInstructionSchema = z.discriminatedUnion("shapeType", [
     description: z.string().optional(),
     /** Pre-assigned tldraw shape ID (without "shape:" prefix). If provided, frontend will use this ID. */
     shapeId: z.string().optional(),
+    /** Placement hint for batch/edit image placement */
+    placementHint: z
+      .object({
+        /** Group ID for batch placement (images in same group placed in a row) */
+        group: z.string().optional(),
+        /** Shape ID of the reference image (for edit placement — anchor near this shape) */
+        referenceShapeId: z.string().optional(),
+      })
+      .optional(),
   }),
   z.object({
     shapeType: z.literal("video"),
