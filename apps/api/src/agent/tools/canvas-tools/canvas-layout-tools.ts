@@ -266,6 +266,9 @@ Use this after organizing shapes to add visual structure. The frame automaticall
         const frameW = maxX - minX + args.padding * 2;
         const frameH = maxY - minY + args.padding * 2 + 32;
 
+        // Pass child IDs so frontend reparents shapes into the frame
+        const childShapeIds = targetShapes.map((s) => s.id);
+
         emitter.emit("add_shape", {
           shapeType: "frame",
           label: args.label,
@@ -273,6 +276,7 @@ Use this after organizing shapes to add visual structure. The frame automaticall
           y: frameY,
           width: frameW,
           height: frameH,
+          childShapeIds,
         });
 
         return {

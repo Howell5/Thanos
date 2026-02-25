@@ -274,5 +274,20 @@ function addFrameShape(
       name: instruction.label,
     },
   });
+
+  // Reparent specified shapes into the frame so they render inside it
+  if (instruction.childShapeIds?.length) {
+    const childIds = instruction.childShapeIds
+      .map((id) => {
+        // Accept both "shape:xxx" and bare IDs
+        const fullId = id.startsWith("shape:") ? id : `shape:${id}`;
+        return fullId as TLShapeId;
+      })
+      .filter((id) => editor.getShape(id)); // only existing shapes
+    if (childIds.length > 0) {
+      editor.reparentShapes(childIds, shapeId);
+    }
+  }
+
   return shapeId;
 }

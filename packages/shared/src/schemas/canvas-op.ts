@@ -20,6 +20,8 @@ export const canvasShapeInstructionSchema = z.discriminatedUnion("shapeType", [
     y: z.number(),
     width: z.number(),
     height: z.number(),
+    /** Shape IDs to reparent into this frame after creation */
+    childShapeIds: z.array(z.string()).optional(),
   }),
   z.object({
     shapeType: z.literal("image"),
