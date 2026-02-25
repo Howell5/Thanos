@@ -71,6 +71,8 @@ export function handleAddShape(
       return addFileShape(editor, instruction);
     case "audio":
       return addAudioShape(editor, instruction);
+    case "frame":
+      return addFrameShape(editor, instruction);
     default:
       return null;
   }
@@ -251,6 +253,25 @@ function addAudioShape(
       template: "audio",
       cardData: JSON.stringify(instruction),
       title: instruction.fileName ?? "Audio",
+    },
+  });
+  return shapeId;
+}
+
+function addFrameShape(
+  editor: Editor,
+  instruction: Extract<CanvasShapeInstruction, { shapeType: "frame" }>,
+): TLShapeId {
+  const shapeId = createShapeId();
+  editor.createShape({
+    id: shapeId,
+    type: "frame",
+    x: instruction.x,
+    y: instruction.y,
+    props: {
+      w: instruction.width,
+      h: instruction.height,
+      name: instruction.label,
     },
   });
   return shapeId;

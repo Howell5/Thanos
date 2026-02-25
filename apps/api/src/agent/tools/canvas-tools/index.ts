@@ -12,15 +12,21 @@ import { db } from "../../../db";
 import { videos } from "../../../db/schema";
 import { analyzeVideoAndWait } from "../../../services/video-analysis.service";
 import { createGenerateImageTool } from "./canvas-generate-tool";
+import { createFrameTool, createOrganizeShapesTool } from "./canvas-layout-tools";
 import {
   createMoveShapesTool,
   createResizeShapesTool,
   createUpdateShapeMetaTool,
 } from "./canvas-mutate-tools";
-import { createGetShapeTool, createListShapesTool } from "./canvas-read-tools";
+import {
+  createGetLayoutSummaryTool,
+  createGetShapesTool,
+  createListShapesTool,
+} from "./canvas-read-tools";
+import { ShapeRefMap } from "./canvas-refs";
 import {
   type CanvasToolsEmitter,
-  createAddShapeTool,
+  createAddShapesTool,
   createCanvasToolsEmitter,
 } from "./canvas-write-tools";
 
@@ -31,21 +37,28 @@ export function createCanvasToolsServer(
   userId: string,
   emitter: CanvasToolsEmitter,
 ) {
+  // Session-scoped ref map shared across all tools
+  const refs = new ShapeRefMap();
+
   return createSdkMcpServer({
     name: "canvas-tools",
     version: "1.0.0",
     tools: [
       // Canvas read tools
-      createListShapesTool(projectId, userId),
-      createGetShapeTool(projectId, userId),
+      createListShapesTool(projectId, userId, refs),
+      createGetShapesTool(projectId, userId, refs),
+      createGetLayoutSummaryTool(projectId, userId),
       // Canvas write tools
-      createAddShapeTool(emitter),
+      createAddShapesTool(emitter),
+      // Canvas layout tools
+      createOrganizeShapesTool(projectId, userId, emitter, refs),
+      createFrameTool(projectId, userId, emitter, refs),
       // AI generation tool
-      createGenerateImageTool(projectId, userId, emitter),
+      createGenerateImageTool(projectId, userId, emitter, refs),
       // Canvas mutation tools
-      createMoveShapesTool(emitter),
-      createResizeShapesTool(emitter),
-      createUpdateShapeMetaTool(emitter),
+      createMoveShapesTool(emitter, refs),
+      createResizeShapesTool(emitter, refs),
+      createUpdateShapeMetaTool(emitter, refs),
       // Video tools
       createAnalyzeVideoTool(projectId),
     ],
@@ -54,8 +67,11 @@ export function createCanvasToolsServer(
 
 export const CANVAS_TOOL_NAMES = [
   "mcp__canvas-tools__list_shapes",
-  "mcp__canvas-tools__get_shape",
-  "mcp__canvas-tools__add_shape",
+  "mcp__canvas-tools__get_shapes",
+  "mcp__canvas-tools__get_layout_summary",
+  "mcp__canvas-tools__add_shapes",
+  "mcp__canvas-tools__organize_shapes",
+  "mcp__canvas-tools__create_frame",
   "mcp__canvas-tools__generate_image",
   "mcp__canvas-tools__move_shapes",
   "mcp__canvas-tools__resize_shapes",

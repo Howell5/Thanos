@@ -14,6 +14,14 @@ export const canvasShapeInstructionSchema = z.discriminatedUnion("shapeType", [
     width: z.number().optional(),
   }),
   z.object({
+    shapeType: z.literal("frame"),
+    label: z.string(),
+    x: z.number(),
+    y: z.number(),
+    width: z.number(),
+    height: z.number(),
+  }),
+  z.object({
     shapeType: z.literal("image"),
     url: z.string(),
     width: z.number().optional(),
@@ -71,7 +79,7 @@ export const moveShapeOpSchema = z
   });
 
 export const moveShapesPayloadSchema = z.object({
-  ops: z.array(moveShapeOpSchema).min(1).max(50),
+  ops: z.array(moveShapeOpSchema).min(1).max(200),
 });
 
 export type MoveShapeOp = z.infer<typeof moveShapeOpSchema>;
@@ -91,7 +99,7 @@ export const resizeShapeOpSchema = z
   });
 
 export const resizeShapesPayloadSchema = z.object({
-  ops: z.array(resizeShapeOpSchema).min(1).max(50),
+  ops: z.array(resizeShapeOpSchema).min(1).max(200),
 });
 
 export type ResizeShapeOp = z.infer<typeof resizeShapeOpSchema>;
@@ -105,7 +113,7 @@ export const updateShapeMetaOpSchema = z.object({
 });
 
 export const updateShapeMetaPayloadSchema = z.object({
-  ops: z.array(updateShapeMetaOpSchema).min(1).max(50),
+  ops: z.array(updateShapeMetaOpSchema).min(1).max(200),
 });
 
 export type UpdateShapeMetaOp = z.infer<typeof updateShapeMetaOpSchema>;

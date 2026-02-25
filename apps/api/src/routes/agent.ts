@@ -29,14 +29,14 @@ function buildSystemPrompt(hasCanvasTools: boolean): string {
     "Your job is to help them understand, organize, and navigate the information on their canvas — answering questions about content, rearranging layouts, adding notes or labels, and surfacing insights.",
     "",
     "## Important: Canvas Tools Are for Information Organization",
-    "The canvas tools (add_shape, move_shapes, resize_shapes, etc.) are for **organizing information on the canvas** — adding labels, annotations, notes, rearranging layout, grouping related items, etc.",
+    "The canvas tools (add_shapes, move_shapes, resize_shapes, etc.) are for **organizing information on the canvas** — adding labels, annotations, notes, rearranging layout, grouping related items, etc.",
     `They are NOT for creating or modifying multimodal content (e.g. don't try to "edit" an image by re-adding it, or "create a presentation" by assembling shapes).`,
     `Think of the canvas as a whiteboard or mood board: you help the user organize what's on it, not author new creative works through shape manipulation.`,
     "",
     "## Communication",
     "- Respond in the same language the user writes in.",
     "- Be concise — the UI renders your text in a small chat panel.",
-    "- When the user asks a question about canvas content, prefer answering in chat text. Use add_shape only when placing information on the canvas genuinely helps (e.g. adding a label, annotation, or summary note next to related shapes).",
+    "- When the user asks a question about canvas content, prefer answering in chat text. Use add_shapes only when placing information on the canvas genuinely helps (e.g. adding a label, annotation, or summary note next to related shapes).",
   ];
 
   if (hasCanvasTools) {
@@ -44,21 +44,25 @@ function buildSystemPrompt(hasCanvasTools: boolean): string {
       "",
       "## Available Canvas Tools",
       "",
-      "### Read",
-      "- **list_shapes**: List all shapes on the canvas (images, videos, text, etc.) with position and dimensions. Use this to understand the current canvas layout.",
-      "- **get_shape**: Get full details of a shape by ID. For images, returns the actual image content so you can see and describe it.",
+      "### Shape Refs",
+      "list_shapes assigns short refs (s1, s2, ...) to shapes. ALL tools accept refs anywhere a shape ID is expected — shorter than full IDs. Refreshed each list_shapes call.",
       "",
-      "### Organize & Annotate",
-      `- **add_shape**: Add a text label, note, or reference link to the canvas. Can also place an image/video/file by URL. Use this for annotations, summaries, and organizational aids — not for "creating content".`,
-      "- **move_shapes**: Rearrange shapes on the canvas. Use absolute (x, y) or relative (dx, dy) coordinates. Batch supported. Useful for grouping related items, aligning layouts, or decluttering.",
-      "- **resize_shapes**: Resize shapes. Use absolute (width, height) or a scale factor. Batch supported. Useful for making important items more prominent or fitting a layout.",
-      "- **update_shape_meta**: Update the meta field (free-form key-value) of shapes. Batch supported. Useful for tagging, categorizing, or adding structured data to shapes.",
+      "### Read & Overview",
+      "- **get_layout_summary**: Cheap spatial overview — bounds, type counts, clusters. Use FIRST for large canvases.",
+      "- **list_shapes**: List shapes (concise by default). detail='full' adds positions. include_content=true adds images (guarded >30). Supports groupBy, search.",
+      "- **get_shapes**: Full details of specific shapes by ref/ID (batch ≤20). Returns image content for image shapes.",
       "",
-      "### AI Generation",
-      "- **generate_image**: Generate images using AI (batch: 1-8 tasks). Models: gemini-2.5-flash-image (50cr), gemini-3-pro-image-preview (100cr, default), seedream-v5 (40cr). Each task: 1-4 images. Pass referenceShapeIds to give the model visual context (style transfer, editing, combining elements, etc).",
+      "### Layout (prefer for bulk ops)",
+      "- **organize_shapes**: Bulk layout — groups by type/metadata/cluster, arranges in grid. One call replaces hundreds of move_shapes.",
+      "- **create_frame**: Labeled frame enclosing specified shapes. Visual grouping after organizing.",
       "",
-      "### Video",
-      "- **analyze_video**: Run AI analysis on a video to extract clip segments (blocks until done).",
+      "### Write & Mutate",
+      `- **add_shapes**: Add shapes (batch ≤50): text, images, videos, files, frames.`,
+      "- **move_shapes / resize_shapes / update_shape_meta**: Mutate existing shapes (batch ≤200).",
+      "",
+      "### AI & Video",
+      "- **generate_image**: AI image gen (batch 1-8 tasks). Models: flash (50cr), pro (100cr, default), seedream-v5 (40cr). Pass referenceShapeIds for visual context.",
+      "- **analyze_video**: AI video analysis to extract clip segments (blocks until done).",
     );
   }
 
@@ -77,14 +81,14 @@ const runAgentSchema = z.object({
   prompt: z.string().min(1),
   workspacePath: z.string().min(1),
   sessionId: z.string().optional(),
-  projectId: z.string().uuid().optional().describe("Project ID for canvas tools access"),
+  projectId: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("Project ID for canvas tools access"),
   mentionedShapes: z.array(mentionedShapeSchema).optional(),
 });
 
-/**
- * Fetch an image and return its base64 data + media type.
- * Returns null if the fetch fails so we can gracefully skip broken images.
- */
 async function fetchImageAsBase64(
   url: string,
 ): Promise<{ data: string; mediaType: string } | null> {
@@ -99,11 +103,7 @@ async function fetchImageAsBase64(
   }
 }
 
-/**
- * Build a prompt with shape context. When image shapes have a thumbnailUrl,
- * fetches the images and returns multimodal content blocks with base64 data
- * so the model sees the image directly without an extra get_shape tool call.
- */
+/** Build prompt with shape context, inlining thumbnails as multimodal blocks */
 async function buildPromptWithShapeContext(
   prompt: string,
   shapes: z.infer<typeof mentionedShapeSchema>[],
@@ -140,7 +140,10 @@ async function buildPromptWithShapeContext(
   const content: SDKUserMessage["message"]["content"] = [
     {
       type: "text" as const,
-      text: ["The user is referring to these canvas shapes:", contextLines.join("\n")].join("\n"),
+      text: [
+        "The user is referring to these canvas shapes:",
+        contextLines.join("\n"),
+      ].join("\n"),
     },
   ];
 
@@ -165,20 +168,7 @@ async function buildPromptWithShapeContext(
   return content;
 }
 
-/**
- * Message-based event model.
- *
- * - text_delta: streaming text fragment (append to current text message)
- * - text_done: the accumulated text block is finalized
- * - tool_use: a tool was invoked (complete: tool name + input)
- * - tool_result: result for a previous tool_use
- * - canvas_add_shape: agent requested adding a shape to the canvas
- * - system: session init
- * - result: agent finished (cost, tokens)
- * - error: something went wrong
- *
- * Keep in sync with apps/web/src/lib/agent-sse.ts
- */
+/** Keep in sync with apps/web/src/lib/agent-sse.ts */
 type AgentMessage =
   | { type: "system"; sessionId: string }
   | { type: "text_delta"; content: string }
@@ -192,215 +182,223 @@ type AgentMessage =
   | { type: "result"; cost: number; inputTokens: number; outputTokens: number }
   | { type: "error"; message: string };
 
-const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), async (c) => {
-  const session = await getSessionOrMock(c);
-  if (!session) {
-    return errors.unauthorized(c);
-  }
-
-  const {
-    prompt: rawPrompt,
-    workspacePath,
-    sessionId,
-    projectId,
-    mentionedShapes,
-  } = c.req.valid("json");
-  const userId = session.user.id;
-
-  // Build prompt — embed image thumbnails as multimodal content blocks when available
-  const promptContent = mentionedShapes?.length
-    ? await buildPromptWithShapeContext(rawPrompt, mentionedShapes)
-    : rawPrompt;
-
-  // If multimodal (array of content blocks), wrap in an async generator yielding SDKUserMessage
-  const prompt: string | AsyncIterable<SDKUserMessage> =
-    typeof promptContent === "string"
-      ? promptContent
-      : (async function* () {
-          yield {
-            type: "user" as const,
-            message: { role: "user" as const, content: promptContent },
-            parent_tool_use_id: null,
-            session_id: "",
-          };
-        })();
-
-  // Ensure workspace directory exists (guard against stale paths from client)
-  if (!existsSync(workspacePath)) {
-    mkdirSync(workspacePath, { recursive: true });
-  }
-
-  // Dev-only: create logger for this agent run
-  const isDev = process.env.NODE_ENV !== "production";
-  const logger = isDev ? new AgentLogger(sessionId) : null;
-  if (logger) {
-    logger.logRequest({
-      prompt: rawPrompt,
-      workspacePath,
-      projectId,
-      sessionId,
-      mentionedShapes,
-    });
-    console.log(`[Agent] Log: ${logger.getFilePath()}`);
-  }
-
-  return streamSSE(c, async (stream) => {
-    // Per-request state for message transformation
-    const state = {
-      hasOpenText: false,
-      toolUseIdToName: new Map<string, string>(),
-    };
-
-    // EventEmitter bridge for canvas tools → SSE stream
-    const pendingShapeEvents: CanvasShapeInstruction[] = [];
-    const pendingMoveEvents: MoveShapesPayload[] = [];
-    const pendingResizeEvents: ResizeShapesPayload[] = [];
-    const pendingMetaEvents: UpdateShapeMetaPayload[] = [];
-    const emitter = createCanvasToolsEmitter();
-    emitter.on("add_shape", (payload) => pendingShapeEvents.push(payload));
-    emitter.on("move_shapes", (payload) => pendingMoveEvents.push(payload));
-    emitter.on("resize_shapes", (payload) => pendingResizeEvents.push(payload));
-    emitter.on("update_shape_meta", (payload) => pendingMetaEvents.push(payload));
-
-    // Helper to flush all pending canvas events to the SSE stream
-    async function drainCanvasEvents() {
-      while (pendingShapeEvents.length > 0) {
-        const instruction = pendingShapeEvents.shift()!;
-        logger?.logShapeEvent(instruction);
-        await stream.writeSSE({
-          data: JSON.stringify({ type: "canvas_add_shape", instruction }),
-          event: "canvas_add_shape",
-        });
-      }
-      while (pendingMoveEvents.length > 0) {
-        const payload = pendingMoveEvents.shift()!;
-        await stream.writeSSE({
-          data: JSON.stringify({ type: "canvas_move_shapes", payload }),
-          event: "canvas_move_shapes",
-        });
-      }
-      while (pendingResizeEvents.length > 0) {
-        const payload = pendingResizeEvents.shift()!;
-        await stream.writeSSE({
-          data: JSON.stringify({ type: "canvas_resize_shapes", payload }),
-          event: "canvas_resize_shapes",
-        });
-      }
-      while (pendingMetaEvents.length > 0) {
-        const payload = pendingMetaEvents.shift()!;
-        await stream.writeSSE({
-          data: JSON.stringify({
-            type: "canvas_update_shape_meta",
-            payload,
-          }),
-          event: "canvas_update_shape_meta",
-        });
-      }
+const agentRoute = new Hono().post(
+  "/run",
+  zValidator("json", runAgentSchema),
+  async (c) => {
+    const session = await getSessionOrMock(c);
+    if (!session) {
+      return errors.unauthorized(c);
     }
 
-    try {
-      // Build MCP servers config — add canvas tools if projectId is provided
-      const mcpServers: Record<string, ReturnType<typeof createCanvasToolsServer>> = {};
-      const allowedTools: string[] = [];
+    const {
+      prompt: rawPrompt,
+      workspacePath,
+      sessionId,
+      projectId,
+      mentionedShapes,
+    } = c.req.valid("json");
+    const userId = session.user.id;
 
-      if (projectId) {
-        mcpServers["canvas-tools"] = createCanvasToolsServer(projectId, userId, emitter);
-        allowedTools.push(...CANVAS_TOOL_NAMES);
-      }
+    // Build prompt — embed image thumbnails as multimodal content blocks when available
+    const promptContent = mentionedShapes?.length
+      ? await buildPromptWithShapeContext(rawPrompt, mentionedShapes)
+      : rawPrompt;
 
-      const hasCanvasTools = Object.keys(mcpServers).length > 0;
+    // If multimodal (array of content blocks), wrap in an async generator yielding SDKUserMessage
+    const prompt: string | AsyncIterable<SDKUserMessage> =
+      typeof promptContent === "string"
+        ? promptContent
+        : (async function* () {
+            yield {
+              type: "user" as const,
+              message: { role: "user" as const, content: promptContent },
+              parent_tool_use_id: null,
+              session_id: "",
+            };
+          })();
 
-      // Built-in tools
-      allowedTools.push("Read", "Write", "WebSearch", "WebFetch");
+    // Ensure workspace directory exists (guard against stale paths from client)
+    if (!existsSync(workspacePath)) {
+      mkdirSync(workspacePath, { recursive: true });
+    }
 
-      // Subagent definitions
-      const agents: Record<string, { description: string; prompt: string; tools?: string[] }> = {
-        "visual-expert": {
-          description:
-            "Visual design and image analysis expert. Use for tasks requiring deep visual understanding, image comparison, style analysis, or creative direction.",
-          prompt: [
-            "You are a Visual Expert — skilled in visual design, image analysis, and creative direction.",
-            "You can see and analyze images on the canvas, generate new images, search the web for visual references, and provide detailed feedback on composition, color, style, and branding.",
-            "Be specific and actionable in your visual analysis. Reference concrete elements (colors, layout, typography, mood) rather than giving vague feedback.",
-            "Respond in the same language the user writes in.",
-          ].join("\n"),
-        },
+    // Dev-only: create logger for this agent run
+    const isDev = process.env.NODE_ENV !== "production";
+    const logger = isDev ? new AgentLogger(sessionId) : null;
+    if (logger) {
+      logger.logRequest({
+        prompt: rawPrompt,
+        workspacePath,
+        projectId,
+        sessionId,
+        mentionedShapes,
+      });
+      console.log(`[Agent] Log: ${logger.getFilePath()}`);
+    }
+
+    return streamSSE(c, async (stream) => {
+      // Per-request state for message transformation
+      const state = {
+        hasOpenText: false,
+        toolUseIdToName: new Map<string, string>(),
       };
 
-      // Give subagents the same tool access as the master agent
-      allowedTools.push("Task");
+      // EventEmitter bridge for canvas tools → SSE stream
+      const pendingShapeEvents: CanvasShapeInstruction[] = [];
+      const pendingMoveEvents: MoveShapesPayload[] = [];
+      const pendingResizeEvents: ResizeShapesPayload[] = [];
+      const pendingMetaEvents: UpdateShapeMetaPayload[] = [];
+      const emitter = createCanvasToolsEmitter();
+      emitter.on("add_shape", (payload) => pendingShapeEvents.push(payload));
+      emitter.on("move_shapes", (payload) => pendingMoveEvents.push(payload));
+      emitter.on("resize_shapes", (payload) =>
+        pendingResizeEvents.push(payload),
+      );
+      emitter.on("update_shape_meta", (payload) =>
+        pendingMetaEvents.push(payload),
+      );
 
-      const queryResult = query({
-        prompt,
-        options: {
-          systemPrompt: buildSystemPrompt(hasCanvasTools),
-          cwd: workspacePath,
-          executable: process.execPath as "node",
-          env: { ...process.env },
-          sandbox: {
-            enabled: true,
-            autoAllowBashIfSandboxed: true,
-            network: { allowLocalBinding: true },
-          },
-          permissionMode: "acceptEdits",
-          maxTurns: 30,
-          includePartialMessages: true,
-          allowedTools,
-          agents,
-          ...(sessionId ? { resume: sessionId } : {}),
-          ...(hasCanvasTools ? { mcpServers } : {}),
-        },
-      });
-
-      for await (const msg of queryResult) {
-        logger?.logSdkMessage(msg);
-
-        // Drain any canvas events queued by tool handlers
-        await drainCanvasEvents();
-
-        const messages = transformMessage(msg, state);
-        for (const m of messages) {
+      // Helper to flush all pending canvas events to the SSE stream
+      async function drainCanvasEvents() {
+        while (pendingShapeEvents.length > 0) {
+          const instruction = pendingShapeEvents.shift()!;
+          logger?.logShapeEvent(instruction);
           await stream.writeSSE({
-            data: JSON.stringify(m),
-            event: m.type,
+            data: JSON.stringify({ type: "canvas_add_shape", instruction }),
+            event: "canvas_add_shape",
+          });
+        }
+        while (pendingMoveEvents.length > 0) {
+          const payload = pendingMoveEvents.shift()!;
+          await stream.writeSSE({
+            data: JSON.stringify({ type: "canvas_move_shapes", payload }),
+            event: "canvas_move_shapes",
+          });
+        }
+        while (pendingResizeEvents.length > 0) {
+          const payload = pendingResizeEvents.shift()!;
+          await stream.writeSSE({
+            data: JSON.stringify({ type: "canvas_resize_shapes", payload }),
+            event: "canvas_resize_shapes",
+          });
+        }
+        while (pendingMetaEvents.length > 0) {
+          const payload = pendingMetaEvents.shift()!;
+          await stream.writeSSE({
+            data: JSON.stringify({
+              type: "canvas_update_shape_meta",
+              payload,
+            }),
+            event: "canvas_update_shape_meta",
           });
         }
       }
 
-      await drainCanvasEvents();
-      logger?.logDone();
-    } catch (error) {
-      // Flush any canvas events that succeeded before the error
-      await drainCanvasEvents();
-      console.error("[Agent] Error:", error);
-      logger?.logError(error);
-      await stream.writeSSE({
-        data: JSON.stringify({
-          type: "error",
-          message: error instanceof Error ? error.message : String(error),
-        }),
-        event: "error",
-      });
-    }
-  });
-});
+      try {
+        // Build MCP servers config — add canvas tools if projectId is provided
+        const mcpServers: Record<
+          string,
+          ReturnType<typeof createCanvasToolsServer>
+        > = {};
+        const allowedTools: string[] = [];
 
-/**
- * Per-request state used during message transformation
- */
+        if (projectId) {
+          mcpServers["canvas-tools"] = createCanvasToolsServer(
+            projectId,
+            userId,
+            emitter,
+          );
+          allowedTools.push(...CANVAS_TOOL_NAMES);
+        }
+
+        const hasCanvasTools = Object.keys(mcpServers).length > 0;
+
+        // Built-in tools
+        allowedTools.push("Read", "Write", "WebSearch", "WebFetch");
+
+        // Subagent definitions
+        const agents: Record<
+          string,
+          { description: string; prompt: string; tools?: string[] }
+        > = {
+          "visual-expert": {
+            description:
+              "Visual design and image analysis expert. Use for tasks requiring deep visual understanding, image comparison, style analysis, or creative direction.",
+            prompt: [
+              "You are a Visual Expert — skilled in visual design, image analysis, and creative direction.",
+              "You can see and analyze images on the canvas, generate new images, search the web for visual references, and provide detailed feedback on composition, color, style, and branding.",
+              "Be specific and actionable in your visual analysis. Reference concrete elements (colors, layout, typography, mood) rather than giving vague feedback.",
+              "Respond in the same language the user writes in.",
+            ].join("\n"),
+          },
+        };
+
+        // Give subagents the same tool access as the master agent
+        allowedTools.push("Task");
+
+        const queryResult = query({
+          prompt,
+          options: {
+            model: "claude-opus-4-6",
+            systemPrompt: buildSystemPrompt(hasCanvasTools),
+            cwd: workspacePath,
+            executable: process.execPath as "node",
+            env: { ...process.env },
+            sandbox: {
+              enabled: true,
+              autoAllowBashIfSandboxed: true,
+              network: { allowLocalBinding: true },
+            },
+            permissionMode: "acceptEdits",
+            maxTurns: 30,
+            includePartialMessages: true,
+            allowedTools,
+            agents,
+            ...(sessionId ? { resume: sessionId } : {}),
+            ...(hasCanvasTools ? { mcpServers } : {}),
+          },
+        });
+
+        for await (const msg of queryResult) {
+          logger?.logSdkMessage(msg);
+
+          // Drain any canvas events queued by tool handlers
+          await drainCanvasEvents();
+
+          const messages = transformMessage(msg, state);
+          for (const m of messages) {
+            await stream.writeSSE({
+              data: JSON.stringify(m),
+              event: m.type,
+            });
+          }
+        }
+
+        await drainCanvasEvents();
+        logger?.logDone();
+      } catch (error) {
+        // Flush any canvas events that succeeded before the error
+        await drainCanvasEvents();
+        console.error("[Agent] Error:", error);
+        logger?.logError(error);
+        await stream.writeSSE({
+          data: JSON.stringify({
+            type: "error",
+            message: error instanceof Error ? error.message : String(error),
+          }),
+          event: "error",
+        });
+      }
+    });
+  },
+);
+
 interface TransformState {
-  /** Whether we have an un-finalized text block streaming */
   hasOpenText: boolean;
-  /** Map tool_use block id → tool name for matching results */
   toolUseIdToName: Map<string, string>;
 }
 
-/**
- * Transform a single SDK message into our message model.
- *
- * Key insight: when the message type changes (e.g. text → tool_use),
- * we emit a "text_done" to finalize the previous text block.
- */
 function transformMessage(msg: unknown, state: TransformState): AgentMessage[] {
   const out: AgentMessage[] = [];
   const message = msg as Record<string, unknown>;
@@ -457,7 +455,9 @@ function transformMessage(msg: unknown, state: TransformState): AgentMessage[] {
             type: "tool_result",
             toolId,
             output:
-              typeof block.content === "string" ? block.content : JSON.stringify(block.content),
+              typeof block.content === "string"
+                ? block.content
+                : JSON.stringify(block.content),
           });
         }
       }
