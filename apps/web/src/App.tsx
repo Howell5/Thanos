@@ -58,7 +58,7 @@ function App() {
           {/* 404 */}
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
-        <ReactQueryDevtools initialIsOpen={false} />
+        <ReactQueryDevtools initialIsOpen={false} position="top" buttonPosition="top-right" />
         <Toaster position="top-right" richColors closeButton />
       </QueryClientProvider>
     </ErrorBoundary>
