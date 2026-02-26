@@ -145,9 +145,11 @@ function addImageShape(
   }
 
   const pos =
-    anchorIds.length > 0
-      ? findNonOverlappingPosition(editor, anchorIds, w, h)
-      : getAutoPosition(editor, w, h);
+    instruction.x != null && instruction.y != null
+      ? { x: instruction.x, y: instruction.y }
+      : anchorIds.length > 0
+        ? findNonOverlappingPosition(editor, anchorIds, w, h)
+        : getAutoPosition(editor, w, h);
 
   // Track in group if applicable
   if (hint?.group) {

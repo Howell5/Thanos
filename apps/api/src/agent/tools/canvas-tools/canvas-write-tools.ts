@@ -64,7 +64,8 @@ IMPORTANT — readability & layout guidelines:
 - For text: ALWAYS set width explicitly — this controls how wide the text block renders. Use width 300–600 for body text so it wraps naturally; use a narrower width (150–250) for short labels or titles so they don't stretch across the canvas. Use fontSize 32–48 for titles/headings, 20–24 for body text. Match the width to the expected text length: a short title like "Hello" needs width ~150, a paragraph needs width ~500.
 - For images: set width/height proportionally so content is clearly visible (at least 300px on the short edge).
 - Consider the existing canvas layout: use list_shapes first to see what's already there and choose coordinates that don't overlap with existing shapes. Leave ~30px padding between shapes.
-- When placing multiple shapes (e.g. labels under images), align them deliberately — use consistent x values for columns and predictable y offsets so the result looks intentional, not scattered.`;
+- When placing multiple shapes (e.g. labels under images), align them deliberately — use consistent x values for columns and predictable y offsets so the result looks intentional, not scattered.
+- ALWAYS provide x/y for image shapes when you know where they should appear. Without x/y, images are auto-placed which may not match the intended layout.`;
 
 // ─── add_shapes Tool (batch-capable) ────────────────────────
 
@@ -155,6 +156,8 @@ function buildInstruction(args: {
       return {
         shapeType: "image",
         url: args.url,
+        x: args.x,
+        y: args.y,
         width: args.width,
         height: args.height,
         altText: args.altText,

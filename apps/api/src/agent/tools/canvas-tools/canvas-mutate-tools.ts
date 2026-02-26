@@ -5,9 +5,10 @@
 
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import type { ShapeRefMap } from "./canvas-refs";
 import type { CanvasToolsEmitter } from "./canvas-write-tools";
 
-export function createMoveShapesTool(emitter: CanvasToolsEmitter) {
+export function createMoveShapesTool(emitter: CanvasToolsEmitter, refs: ShapeRefMap) {
   return tool(
     "move_shapes",
     `Move one or more shapes on the canvas.
@@ -21,7 +22,7 @@ Use list_shapes first to see current positions and avoid overlaps.`,
       ops: z
         .array(
           z.object({
-            shapeId: z.string().describe("tldraw shape ID, e.g. 'shape:abc123'"),
+            shapeId: z.string().describe("Shape ref (e.g. 's1') or full tldraw ID (e.g. 'shape:abc123')"),
             x: z.number().optional().describe("Absolute target X"),
             y: z.number().optional().describe("Absolute target Y"),
             dx: z.number().optional().describe("Relative X offset added to current position"),
@@ -34,7 +35,8 @@ Use list_shapes first to see current positions and avoid overlaps.`,
     },
     async (args) => {
       try {
-        emitter.emit("move_shapes", { ops: args.ops });
+        const resolvedOps = args.ops.map((op) => ({ ...op, shapeId: refs.resolve(op.shapeId) }));
+        emitter.emit("move_shapes", { ops: resolvedOps });
         return {
           content: [
             {
@@ -55,7 +57,7 @@ Use list_shapes first to see current positions and avoid overlaps.`,
   );
 }
 
-export function createResizeShapesTool(emitter: CanvasToolsEmitter) {
+export function createResizeShapesTool(emitter: CanvasToolsEmitter, refs: ShapeRefMap) {
   return tool(
     "resize_shapes",
     `Resize one or more shapes on the canvas.
@@ -83,7 +85,8 @@ Use list_shapes first to see current dimensions.`,
     },
     async (args) => {
       try {
-        emitter.emit("resize_shapes", { ops: args.ops });
+        const resolvedOps = args.ops.map((op) => ({ ...op, shapeId: refs.resolve(op.shapeId) }));
+        emitter.emit("resize_shapes", { ops: resolvedOps });
         return {
           content: [
             {
@@ -104,7 +107,7 @@ Use list_shapes first to see current dimensions.`,
   );
 }
 
-export function createUpdateShapeMetaTool(emitter: CanvasToolsEmitter) {
+export function createUpdateShapeMetaTool(emitter: CanvasToolsEmitter, refs: ShapeRefMap) {
   return tool(
     "update_shape_meta",
     `Update the meta field of one or more shapes.
@@ -127,7 +130,8 @@ existing keys not mentioned are preserved. Set a key to null to remove it.`,
     },
     async (args) => {
       try {
-        emitter.emit("update_shape_meta", { ops: args.ops });
+        const resolvedOps = args.ops.map((op) => ({ ...op, shapeId: refs.resolve(op.shapeId) }));
+        emitter.emit("update_shape_meta", { ops: resolvedOps });
         return {
           content: [
             {

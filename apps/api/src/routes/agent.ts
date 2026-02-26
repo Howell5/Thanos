@@ -37,6 +37,14 @@ function buildSystemPrompt(hasCanvasTools: boolean): string {
     "- Respond in the same language the user writes in.",
     "- Be concise — the UI renders your text in a small chat panel.",
     "- When the user asks a question about canvas content, prefer answering in chat text. Use add_shapes only when placing information on the canvas genuinely helps (e.g. adding a label, annotation, or summary note next to related shapes).",
+    "",
+    "## Canvas Layout Principles",
+    "Apply these rules whenever placing shapes on the canvas:",
+    "- **No overlap**: Shapes must not overlap each other. Use list_shapes or get_layout_summary to check existing positions before placing new content.",
+    "- **F-pattern reading order**: Arrange content left-to-right, top-to-bottom. Primary content at top-left; supporting detail below or to the right.",
+    "- **Intentional proximity**: Place related shapes near each other. A generated image should appear adjacent to the text prompt or label that describes it. Annotations belong next to the shape they annotate.",
+    "- **Text width matches content**: Short labels (1-5 words) use width 150-250px. Body text or descriptions use width 400-600px. Never let a short label span the full canvas width.",
+    "- **Consistent alignment**: When placing multiple shapes in a group (e.g. image + caption), align them on a shared axis. Use consistent x for a column, consistent y for a row.",
   ];
 
   if (hasCanvasTools) {
@@ -53,7 +61,7 @@ function buildSystemPrompt(hasCanvasTools: boolean): string {
       "- **get_shapes**: Full details of specific shapes by ref/ID (batch ≤20). Returns image content for image shapes.",
       "",
       "### Layout (prefer for bulk ops)",
-      "- **organize_shapes**: Bulk layout — groups by type/metadata/cluster, arranges in grid. One call replaces hundreds of move_shapes.",
+      "- **organize_shapes**: Bulk layout — groups by type/metadata/cluster, arranges in grid. Use ONLY when the user explicitly requests reorganization or cleanup. Do not invoke proactively.",
       "- **create_frame**: Labeled frame enclosing specified shapes. Visual grouping after organizing.",
       "",
       "### Write & Mutate",
@@ -61,7 +69,7 @@ function buildSystemPrompt(hasCanvasTools: boolean): string {
       "- **move_shapes / resize_shapes / update_shape_meta**: Mutate existing shapes (batch ≤200).",
       "",
       "### AI & Video",
-      "- **generate_image**: AI image gen (batch 1-8 tasks). Models: flash (50cr), pro (100cr, default), seedream-v5 (40cr). Pass referenceShapeIds for visual context.",
+      "- **generate_image**: AI image gen (batch 1-8 tasks). Models: flash (50cr), pro (100cr, default), seedream-v5 (40cr). Pass referenceShapeIds for visual context. Set x/y per task to place images at specific canvas positions.",
       "- **analyze_video**: AI video analysis to extract clip segments (blocks until done).",
     );
   }

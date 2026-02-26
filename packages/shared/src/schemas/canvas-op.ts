@@ -26,6 +26,8 @@ export const canvasShapeInstructionSchema = z.discriminatedUnion("shapeType", [
   z.object({
     shapeType: z.literal("image"),
     url: z.string(),
+    x: z.number().optional(),
+    y: z.number().optional(),
     width: z.number().optional(),
     height: z.number().optional(),
     altText: z.string().optional(),

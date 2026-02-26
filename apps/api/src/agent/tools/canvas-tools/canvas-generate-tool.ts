@@ -14,6 +14,7 @@ import { db } from "../../../db";
 import { aiImages, aiUsageHistory, projects, shapeMetadata, user } from "../../../db/schema";
 import { deleteFromR2, generateImageKey, uploadToR2 } from "../../../lib/r2";
 import { loadProjectStore } from "./canvas-helpers";
+import type { ShapeRefMap } from "./canvas-refs";
 import type { CanvasToolsEmitter } from "./canvas-write-tools";
 import {
   GEMINI_PRO_MODEL,
@@ -55,6 +56,8 @@ const taskSchema = z.object({
     .describe(
       "Shape IDs of canvas images to use as visual context. The model sees these images and follows the prompt to produce new output.",
     ),
+  x: z.number().optional().describe("Canvas X coordinate for the first generated image. Must be provided together with y. Additional images in the batch auto-place in a row beside it."),
+  y: z.number().optional().describe("Canvas Y coordinate for the first generated image. Must be provided together with x."),
   summary: z.string().max(200).optional().describe("Short human-readable context summary"),
 });
 
@@ -62,6 +65,7 @@ export function createGenerateImageTool(
   projectId: string,
   userId: string,
   emitter: CanvasToolsEmitter,
+  refs: ShapeRefMap,
 ) {
   return tool(
     "generate_image",
@@ -69,6 +73,7 @@ export function createGenerateImageTool(
 
 - Provide only a prompt for text-to-image generation.
 - Provide referenceShapeIds to give the model visual context — it sees the referenced canvas images alongside your prompt. Works for style transfer, editing, combining elements, background removal, etc.
+- Use x/y per task to place generated images at specific canvas coordinates. If omitted, images are auto-placed to avoid overlap. Prefer explicit x/y when you know where the image should appear relative to existing content.
 
 Models: gemini-2.5-flash-image (50cr), gemini-3-pro-image-preview (100cr, default), seedream-v5 (40cr, fal.ai).
 Each task can produce 1-4 images. All tasks run in parallel.`,
@@ -89,13 +94,14 @@ Each task can produce 1-4 images. All tasks run in parallel.`,
           };
         }
 
-        // Expand tasks and compute total credits
+        // Expand tasks and compute total credits, resolve short refs
         const expanded = args.tasks.map((t) => {
           const model = t.model || GEMINI_PRO_MODEL;
           const cost = estimateCreditsForModel(model, t.imageSize) * t.numberOfImages;
           return {
             ...t,
             model,
+            referenceShapeIds: t.referenceShapeIds?.map((id) => refs.resolve(id)),
             costPerImage: estimateCreditsForModel(model, t.imageSize),
             totalCost: cost,
           };
@@ -181,6 +187,8 @@ interface TaskInput {
   model: string;
   numberOfImages: number;
   referenceShapeIds?: string[];
+  x?: number;
+  y?: number;
   summary?: string;
   costPerImage: number;
   totalCost: number;
@@ -281,6 +289,7 @@ async function runSingleGenTask(
 
   try {
     await db.transaction(async (tx) => {
+      let imageIndex = 0;
       for (const { key, upload, img } of uploads) {
         const tldrawId = randomUUID().replace(/-/g, "").slice(0, 12);
         const fullShapeId = `shape:${tldrawId}`;
@@ -350,7 +359,10 @@ async function runSingleGenTask(
           description,
           shapeId: tldrawId,
           placementHint: hint,
+          ...(imageIndex === 0 && task.x != null ? { x: task.x } : {}),
+          ...(imageIndex === 0 && task.y != null ? { y: task.y } : {}),
         });
+        imageIndex++;
       }
     });
   } catch (txError) {
