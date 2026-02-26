@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "skills": {
+    "fal-audio": {
+      "source": "fal-ai-community/skills",
+      "sourceType": "github",
+      "computedHash": "7e22715342471c75ac15b84e476ed33c5ebbea11caae2b706019edd8f9df2360"
+    },
+    "fal-generate": {
+      "source": "fal-ai-community/skills",
+      "sourceType": "github",
+      "computedHash": "f0fe31cd396db141676d703f7f61de76a60693d03f355e46f6b53dac7c18449f"
+    },
+    "fal-image-edit": {
+      "source": "fal-ai-community/skills",
+      "sourceType": "github",
+      "computedHash": "979e9ebec7b25b01d0ba2160a1ef911209f54175d9c4ab80dd223d15e7c48b01"
+    }
+  }
+}

@@ -22,5 +22,8 @@ export * from "./schemas/video";
 // Editing plan schemas
 export * from "./schemas/editing-plan";
 
+// Canvas operation schemas
+export * from "./schemas/canvas-op";
+
 // Pricing config
 export * from "./config/pricing";

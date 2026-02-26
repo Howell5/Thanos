@@ -1,4 +1,10 @@
-import { type AgentMessage, subscribeAgentSSE } from "@/lib/agent-sse";
+import { type AgentMessage, type MentionedShapeContext, subscribeAgentSSE } from "@/lib/agent-sse";
+import {
+  requestCanvasAddShape,
+  requestCanvasMoveShapes,
+  requestCanvasResizeShapes,
+  requestCanvasUpdateShapeMeta,
+} from "@/lib/canvas-events";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -54,7 +60,7 @@ interface AgentState {
   // Actions
   setWorkspacePath: (path: string) => void;
   setProjectId: (id: string | null) => void;
-  sendMessage: (prompt: string) => void;
+  sendMessage: (prompt: string, mentionedShapes?: MentionedShapeContext[]) => void;
   stop: () => void;
   reset: () => void;
   restoreSession: (
@@ -63,7 +69,8 @@ interface AgentState {
   ) => void;
 }
 
-const DEFAULT_WORKSPACE_PATH = "/Users/willhong/Code/Work/Thanos/workspaces/test-project";
+const DEFAULT_WORKSPACE_PATH =
+  import.meta.env.VITE_WORKSPACE_PATH || "/Users/xerwanderer/Developer/Thanos/workspaces/default";
 
 const EMPTY_SESSION: ProjectSession = {
   sessionId: null,
@@ -137,7 +144,7 @@ export const useAgentStore = create<AgentState>()(
         });
       },
 
-      sendMessage: (prompt: string) => {
+      sendMessage: (prompt: string, mentionedShapes?: MentionedShapeContext[]) => {
         const { workspacePath, sessionId, projectId, _abortFn } = get();
         if (_abortFn) _abortFn();
 
@@ -166,6 +173,7 @@ export const useAgentStore = create<AgentState>()(
             workspacePath,
             ...(isResume && sessionId ? { sessionId } : {}),
             ...(projectId ? { projectId } : {}),
+            ...(mentionedShapes?.length ? { mentionedShapes } : {}),
           },
           (msg) => {
             applyMessage(msg, get, set);
@@ -227,7 +235,6 @@ export const useAgentStore = create<AgentState>()(
       partialize: (state) => ({
         // Persist the sessions map (merge current active state first)
         sessions: saveCurrentSession(state),
-        workspacePath: state.workspacePath,
         projectId: state.projectId,
       }),
       // On rehydrate, restore active project's session from the map
@@ -331,6 +338,24 @@ function applyMessage(msg: AgentMessage, get: Get, set: Set): void {
     case "error": {
       msgs.push({ type: "error", message: msg.message });
       set({ messages: msgs, status: "error", error: msg.message, _abortFn: null });
+      return;
+    }
+
+    case "canvas_add_shape": {
+      // Delegate to canvas event bus — store stays canvas-agnostic
+      requestCanvasAddShape(msg.instruction);
+      return;
+    }
+    case "canvas_move_shapes": {
+      requestCanvasMoveShapes(msg.payload);
+      return;
+    }
+    case "canvas_resize_shapes": {
+      requestCanvasResizeShapes(msg.payload);
+      return;
+    }
+    case "canvas_update_shape_meta": {
+      requestCanvasUpdateShapeMeta(msg.payload);
       return;
     }
   }

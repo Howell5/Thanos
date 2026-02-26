@@ -9,16 +9,25 @@ import {
   useEditor,
 } from "tldraw";
 import "tldraw/tldraw.css";
-import { Button } from "@/components/ui/button";
-import { useAgentCanvasSync } from "@/hooks/use-agent-canvas-sync";
 import { useAgentRenderer } from "@/hooks/use-agent-renderer";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import {
   type AddVideoPayload,
+  onCanvasAddShapeRequest,
   onCanvasAddVideoRequest,
+  onCanvasClearHighlight,
+  onCanvasHighlightShape,
+  onCanvasMoveShapesRequest,
+  onCanvasResizeShapesRequest,
   onCanvasSaveRequest,
+  onCanvasUpdateShapeMetaRequest,
+  onShapeDescribeRequest,
   requestCanvasSave,
 } from "@/lib/canvas-events";
+import { listenForAssetUploads, pollShapeDescription, syncDescriptionsFromDb } from "@/lib/shape-describe-poller";
+import { handleAddShape } from "@/lib/canvas-shape-builder";
+import { deriveShapeSummaries } from "@/lib/shape-summary";
+import { useCanvasShapeStore } from "@/stores/use-canvas-shape-store";
 import {
   DEFAULT_MAX_IMAGE_SIZE,
   type ImageMeta,
@@ -26,20 +35,13 @@ import {
   getVideoDimensions,
   isVideoFile,
 } from "@/lib/image-assets";
-import { ROUTES } from "@/lib/routes";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { selectUploadingCount, useAIStore } from "@/stores/use-ai-store";
-import { ArrowLeft, Check, Loader2, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { AgentTurnShapeUtil } from "./agent-turn-shape";
-import { BottomPromptPanel } from "./bottom-prompt-panel";
-import { FloatingToolbar } from "./floating-toolbar";
-import { GeneratingOverlay } from "./generating-overlay";
-import { InpaintingOverlay } from "./inpainting-overlay";
+import { type SaveStatus, InFrontOfTheCanvas, setCanvasPropsStore } from "./canvas-overlay";
 import { RichCardShapeUtil } from "./rich-card-shape";
-import { UploadingOverlay } from "./uploading-overlay";
 import { VIDEO_SHAPE_TYPE, VideoShapeUtil } from "./video-shape";
 
 const AUTO_SAVE_DELAY = 2000;
@@ -52,17 +54,6 @@ interface TldrawCanvasProps {
   isSaving: boolean;
 }
 
-// Save status for UI feedback
-type SaveStatus = "idle" | "saving" | "saved";
-
-// Store for passing props to InFrontOfTheCanvas
-let canvasPropsStore: {
-  projectName: string;
-  onSave: () => void;
-  isSaving: boolean;
-  saveStatus: SaveStatus;
-} | null = null;
-
 // Component to handle keyboard shortcuts and upload cleanup
 function CanvasEventHandler() {
   const editor = useEditor();
@@ -73,9 +64,6 @@ function CanvasEventHandler() {
 
   // Connect agent renderer to canvas (for artifact placement)
   useAgentRenderer(editor);
-
-  // Sync agent turns to canvas shapes
-  useAgentCanvasSync(editor);
 
   useEffect(() => {
     return editor.store.listen(
@@ -107,62 +95,80 @@ function CanvasEventHandler() {
     });
   }, [editor]);
 
-  return null;
-}
+  // Listen for agent add_shape tool events
+  useEffect(() => onCanvasAddShapeRequest((instruction) => {
+    handleAddShape(editor, instruction);
+    requestCanvasSave();
+  }), [editor]);
 
-// Component rendered in front of the canvas (highest z-index)
-function InFrontOfTheCanvas() {
-  const props = canvasPropsStore;
-  return (
-    <>
-      <FloatingToolbar />
-      {/* <BottomPromptPanel /> */}
-      <GeneratingOverlay />
-      <InpaintingOverlay />
-      <UploadingOverlay />
-      {/* Top Bar — pointer-events-auto needed because tldraw's InFrontOfTheCanvas has pointer-events: none */}
-      <div className="pointer-events-auto fixed left-4 top-4 z-[300] flex items-center gap-2">
-        <Button
-          asChild
-          variant="outline"
-          size="sm"
-          className="border-gray-200 bg-white shadow-sm hover:bg-gray-50"
-        >
-          <Link to={ROUTES.PROJECTS}>
-            <ArrowLeft className="mr-1.5 h-4 w-4" />
-            返回
-          </Link>
-        </Button>
-        <div className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium shadow-sm">
-          {props?.projectName}
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={props?.onSave}
-          disabled={props?.isSaving || props?.saveStatus === "saving"}
-          className="border-gray-200 bg-white shadow-sm hover:bg-gray-50"
-        >
-          {props?.saveStatus === "saving" ? (
-            <>
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              保存中
-            </>
-          ) : props?.saveStatus === "saved" ? (
-            <>
-              <Check className="mr-1.5 h-4 w-4 text-green-600" />
-              已保存
-            </>
-          ) : (
-            <>
-              <Save className="mr-1.5 h-4 w-4" />
-              保存
-            </>
-          )}
-        </Button>
-      </div>
-    </>
-  );
+  // Listen for agent canvas mutation tool events (move, resize, update_meta)
+  useEffect(() => {
+    const unsubs = [
+      onCanvasMoveShapesRequest(({ ops }) => {
+        for (const op of ops) {
+          const shape = editor.getShape(op.shapeId as Parameters<typeof editor.getShape>[0]);
+          if (!shape) continue;
+          editor.updateShape({ id: shape.id, type: shape.type,
+            x: op.x !== undefined ? op.x : shape.x + (op.dx ?? 0),
+            y: op.y !== undefined ? op.y : shape.y + (op.dy ?? 0),
+          });
+        }
+        requestCanvasSave();
+      }),
+      onCanvasResizeShapesRequest(({ ops }) => {
+        for (const op of ops) {
+          const shape = editor.getShape(op.shapeId as Parameters<typeof editor.getShape>[0]);
+          if (!shape) continue;
+          const cw = (shape.props as { w?: number }).w ?? 0;
+          const ch = (shape.props as { h?: number }).h ?? 0;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic shape type
+          editor.updateShape({ id: shape.id, type: shape.type, props: {
+            w: op.scale != null ? cw * op.scale : (op.width ?? cw),
+            h: op.scale != null ? ch * op.scale : (op.height ?? ch),
+          }} as any);
+        }
+        requestCanvasSave();
+      }),
+      onCanvasUpdateShapeMetaRequest(({ ops }) => {
+        for (const op of ops) {
+          const shape = editor.getShape(op.shapeId as Parameters<typeof editor.getShape>[0]);
+          if (!shape) continue;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic shape type
+          editor.updateShape({ id: shape.id, type: shape.type, meta: { ...shape.meta, ...op.meta } } as any);
+        }
+        requestCanvasSave();
+      }),
+    ];
+    return () => unsubs.forEach((fn) => fn());
+  }, [editor]);
+
+  // Sync live shape list to useCanvasShapeStore
+  useEffect(() => {
+    const syncShapes = () => {
+      useCanvasShapeStore.getState().setShapes(deriveShapeSummaries(editor));
+    };
+    syncShapes();
+    return editor.store.listen(syncShapes, { source: "all", scope: "document" });
+  }, [editor]);
+
+  // Shape highlight, describe polling, and asset upload listeners
+  useEffect(() => {
+    const projectId = useAIStore.getState().projectId;
+    const unsubs = [
+      onCanvasHighlightShape((shapeId) => {
+        const shape = editor.getShape(shapeId as Parameters<typeof editor.getShape>[0]);
+        if (shape) { editor.select(shape.id); editor.zoomToSelection({ animation: { duration: 200 } }); }
+      }),
+      onCanvasClearHighlight(() => editor.selectNone()),
+      onShapeDescribeRequest(({ shapeId, projectId: pid }) => pollShapeDescription(shapeId, pid, editor)),
+      ...(projectId ? [listenForAssetUploads(editor, projectId)] : []),
+    ];
+    // Sync descriptions from DB on mount (backfills descriptions completed after page refresh)
+    if (projectId) syncDescriptionsFromDb(editor, projectId);
+    return () => unsubs.forEach((fn) => fn());
+  }, [editor]);
+
+  return null;
 }
 
 function VerticalToolbar() {
@@ -187,15 +193,9 @@ const uiComponents: Partial<TLUiComponents> = {
   ImageToolbar: null,
 };
 
-// Check if canvasData has valid snapshot format
 function isValidSnapshot(data: unknown): data is { document: unknown } {
-  return (
-    data !== null &&
-    typeof data === "object" &&
-    "document" in data &&
-    data.document !== null &&
-    typeof data.document === "object"
-  );
+  return data !== null && typeof data === "object" && "document" in data &&
+    data.document !== null && typeof data.document === "object";
 }
 
 // Inner component that has access to the editor
@@ -385,16 +385,9 @@ export function TldrawCanvas({
     [scheduleAutoSave],
   );
 
-  // Cleanup timers on unmount
-  useEffect(() => {
-    return () => {
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current);
-      }
-      if (savedStatusTimerRef.current) {
-        clearTimeout(savedStatusTimerRef.current);
-      }
-    };
+  useEffect(() => () => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    if (savedStatusTimerRef.current) clearTimeout(savedStatusTimerRef.current);
   }, []);
 
   // Subscribe to external save requests (from upload complete, AI generation, etc.)
@@ -439,8 +432,9 @@ export function TldrawCanvas({
 
       for (const file of videoFiles) {
         try {
+          const shapeId = createShapeId();
           const [result, dims] = await Promise.all([
-            uploadImage(file, ""),
+            uploadImage(file, shapeId),
             getVideoDimensions(file),
           ]);
           const maxEdge = Math.max(dims.width, dims.height);
@@ -449,6 +443,7 @@ export function TldrawCanvas({
           const h = Math.round(dims.height * scale);
 
           editor.createShape({
+            id: shapeId,
             type: VIDEO_SHAPE_TYPE,
             x: dropPoint.x - w / 2,
             y: dropPoint.y - h / 2,
@@ -472,12 +467,12 @@ export function TldrawCanvas({
   );
 
   // Update props store for InFrontOfTheCanvas
-  canvasPropsStore = {
+  setCanvasPropsStore({
     projectName,
     onSave: handleSave,
     isSaving,
     saveStatus,
-  };
+  });
 
   return (
     <div className="relative h-full w-full" onDropCapture={handleDropCapture}>

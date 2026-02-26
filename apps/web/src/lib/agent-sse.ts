@@ -1,3 +1,9 @@
+import type {
+  CanvasShapeInstruction,
+  MoveShapesPayload,
+  ResizeShapesPayload,
+  UpdateShapeMetaPayload,
+} from "@repo/shared";
 import { env } from "../env";
 
 /**
@@ -8,9 +14,12 @@ import { env } from "../env";
  * - text_done: current text block is finalized
  * - tool_use: a tool was invoked (name + input)
  * - tool_result: result for a previous tool_use (matched by toolId)
+ * - canvas_add_shape: agent requested adding a shape to the canvas
  * - system: session init
  * - result: agent finished with cost/token stats
  * - error: something went wrong
+ *
+ * Keep in sync with apps/api/src/routes/agent.ts
  */
 export type AgentMessage =
   | { type: "system"; sessionId: string }
@@ -18,14 +27,26 @@ export type AgentMessage =
   | { type: "text_done" }
   | { type: "tool_use"; toolId: string; tool: string; input: unknown }
   | { type: "tool_result"; toolId: string; output: string }
+  | { type: "canvas_add_shape"; instruction: CanvasShapeInstruction }
+  | { type: "canvas_move_shapes"; payload: MoveShapesPayload }
+  | { type: "canvas_resize_shapes"; payload: ResizeShapesPayload }
+  | { type: "canvas_update_shape_meta"; payload: UpdateShapeMetaPayload }
   | { type: "result"; cost: number; inputTokens: number; outputTokens: number }
   | { type: "error"; message: string };
+
+export interface MentionedShapeContext {
+  id: string;
+  type: string;
+  brief: string;
+  thumbnailUrl: string | null;
+}
 
 export interface AgentRunParams {
   prompt: string;
   workspacePath: string;
   sessionId?: string;
-  projectId?: string; // For video tools access
+  projectId?: string;
+  mentionedShapes?: MentionedShapeContext[];
 }
 
 /**

@@ -4,6 +4,7 @@
  */
 
 import { ApiError, api } from "@/lib/api";
+import { requestShapeDescribe } from "@/lib/canvas-events";
 import type { AllowedUploadType, ConfirmUploadResponse, PresignUploadResponse } from "@repo/shared";
 import { isVideoType } from "@repo/shared";
 import type { StateCreator } from "zustand";
@@ -308,6 +309,7 @@ export const createUploadSlice: StateCreator<UploadSlice & UploadSliceDeps, [], 
           fileSize: file.size,
           width: metadata.width || undefined,
           height: metadata.height || undefined,
+          shapeId: shapeId || undefined,
         },
       });
 
@@ -337,6 +339,7 @@ export const createUploadSlice: StateCreator<UploadSlice & UploadSliceDeps, [], 
               width: metadata.width || undefined,
               height: metadata.height || undefined,
               duration: metadata.duration,
+              shapeId: shapeId || undefined,
             },
           });
 
@@ -352,6 +355,12 @@ export const createUploadSlice: StateCreator<UploadSlice & UploadSliceDeps, [], 
 
       // Complete the upload
       get().completeUpload(taskId, data.r2Url, data.id, videoId);
+
+      // Trigger description polling if shapeId is available
+      // For videos, only poll if backend received the shapeId (video record created)
+      if (shapeId && projectId && (!isVideo || videoId)) {
+        requestShapeDescribe({ shapeId, projectId });
+      }
 
       return { ...data, videoId, duration: metadata.duration };
     } catch (error) {

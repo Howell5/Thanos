@@ -10,6 +10,7 @@ import { db } from "../../db";
 import { videos } from "../../db/schema";
 import { getSessionOrMock } from "../../lib/mock-session";
 import { errors, ok } from "../../lib/response";
+import { triggerShapeDescribe } from "../../services/shape-describe.service";
 import { triggerVideoAnalysis } from "../../services/video-analysis.service";
 import { verifyProjectAccess } from "./helpers";
 
@@ -49,6 +50,19 @@ const createRoute = new Hono().post("/", zValidator("json", createVideoSchema), 
 
   // Trigger async analysis task
   triggerVideoAnalysis(video.id);
+
+  // Trigger shape describe if shapeId provided
+  if (data.shapeId) {
+    triggerShapeDescribe({
+      shapeId: data.shapeId,
+      projectId: data.projectId,
+      userId,
+      assetUrl: data.r2Url,
+      mediaType: "video",
+      mimeType: data.mimeType,
+      originalFileName: data.originalFileName,
+    });
+  }
 
   return ok(c, { id: video.id, analysisStatus: video.analysisStatus }, 201);
 });

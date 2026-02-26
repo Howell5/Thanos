@@ -46,3 +46,11 @@ drizzle
 
 # Google Cloud Service Account
 baryon-*.json
+gcp-credentials.json
+*-service-account.json
+
+# workspaces
+/workspaces
+
+# Claude Code worktrees
+.claude/worktrees/

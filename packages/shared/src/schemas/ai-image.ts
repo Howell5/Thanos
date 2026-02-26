@@ -228,6 +228,8 @@ export const confirmUploadSchema = z.object({
   fileSize: z.number().int().positive(),
   width: z.number().int().nonnegative().optional(),
   height: z.number().int().nonnegative().optional(),
+  // tldraw shape ID for triggering auto-describe
+  shapeId: z.string().optional(),
 });
 
 export type ConfirmUpload = z.infer<typeof confirmUploadSchema>;

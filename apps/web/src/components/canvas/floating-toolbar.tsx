@@ -1,5 +1,6 @@
 import type { ImageMeta } from "@/lib/image-assets";
 import { useAIStore } from "@/stores/use-ai-store";
+import { VIDEO_SHAPE_TYPE } from "./video-shape";
 import { Copy, Download, Info, Paintbrush } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type TLImageShape, type TLShapeId, createShapeId, useEditor } from "tldraw";
@@ -18,10 +19,14 @@ function formatRelativeTime(timestamp: number): string {
   return `${days} 天前`;
 }
 
+const SUPPORTED_TYPES = new Set(["image", VIDEO_SHAPE_TYPE]);
+
 export function FloatingToolbar() {
   const editor = useEditor();
   const { editMode, enterInpaintMode } = useAIStore();
-  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
+  const [selectedShapeType, setSelectedShapeType] = useState<string | null>(null);
+  const [selectedMeta, setSelectedMeta] = useState<ImageMeta | null>(null);
   const [toolbarPosition, setToolbarPosition] = useState<{ x: number; y: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
@@ -58,10 +63,12 @@ export function FloatingToolbar() {
   const updateSelection = useCallback(() => {
     const selectedShapes = editor.getSelectedShapes();
 
-    // Check if exactly one image is selected
-    if (selectedShapes.length === 1 && selectedShapes[0].type === "image") {
-      const shape = selectedShapes[0] as TLImageShape;
-      setSelectedImageId(shape.id);
+    // Check if exactly one supported shape is selected
+    if (selectedShapes.length === 1 && SUPPORTED_TYPES.has(selectedShapes[0].type)) {
+      const shape = selectedShapes[0];
+      setSelectedShapeId(shape.id);
+      setSelectedShapeType(shape.type);
+      setSelectedMeta((shape.meta as unknown as ImageMeta) || null);
 
       // Get the screen bounds of the shape
       const bounds = editor.getShapePageBounds(shape.id);
@@ -74,7 +81,9 @@ export function FloatingToolbar() {
         });
       }
     } else {
-      setSelectedImageId(null);
+      setSelectedShapeId(null);
+      setSelectedShapeType(null);
+      setSelectedMeta(null);
       setToolbarPosition(null);
       setShowInfo(false);
     }
@@ -91,89 +100,74 @@ export function FloatingToolbar() {
     };
   }, [editor, updateSelection]);
 
-  // Get the image data URL from selected image
-  const getSelectedImageDataUrl = (): string | null => {
-    if (!selectedImageId) return null;
+  // Get download URL for selected shape
+  const getSelectedDownloadUrl = (): string | null => {
+    if (!selectedShapeId) return null;
 
-    const shape = editor.getShape(selectedImageId as TLShapeId) as TLImageShape;
-    if (!shape || shape.type !== "image") return null;
+    const shape = editor.getShape(selectedShapeId as TLShapeId);
+    if (!shape) return null;
 
-    const assetId = shape.props.assetId;
-    if (!assetId) return null;
+    if (shape.type === "image") {
+      const imageShape = shape as TLImageShape;
+      const assetId = imageShape.props.assetId;
+      if (!assetId) return null;
+      const asset = editor.getAsset(assetId);
+      if (!asset || asset.type !== "image") return null;
+      return asset.props.src || null;
+    }
 
-    const asset = editor.getAsset(assetId);
-    if (!asset || asset.type !== "image") return null;
+    if (shape.type === VIDEO_SHAPE_TYPE) {
+      return (shape.props as Record<string, unknown>).videoUrl as string ?? null;
+    }
 
-    return asset.props.src || null;
+    return null;
   };
 
-  // Get meta info from selected image
-  const getSelectedImageMeta = (): ImageMeta | null => {
-    if (!selectedImageId) return null;
-
-    const shape = editor.getShape(selectedImageId as TLShapeId) as TLImageShape;
-    if (!shape || shape.type !== "image") return null;
-
-    return (shape.meta as unknown as ImageMeta) || null;
-  };
-
-  // Duplicate image and place it to the right of the original
+  // Duplicate shape and place it to the right of the original
   const handleCopy = () => {
-    if (!selectedImageId) return;
+    if (!selectedShapeId) return;
 
-    const shape = editor.getShape(selectedImageId as TLShapeId) as TLImageShape;
-    if (!shape || shape.type !== "image") return;
+    const shape = editor.getShape(selectedShapeId as TLShapeId);
+    if (!shape) return;
+
+    const props = shape.props as Record<string, unknown>;
+    const w = (typeof props.w === "number" ? props.w : 320);
 
     const newShapeId = createShapeId();
     editor.createShape({
       id: newShapeId,
-      type: "image",
-      x: shape.x + shape.props.w! + 20, // Place to the right with 20px gap
+      type: shape.type,
+      x: shape.x + w + 20,
       y: shape.y,
-      props: {
-        assetId: shape.props.assetId,
-        w: shape.props.w,
-        h: shape.props.h,
-      },
-      meta: shape.meta, // Copy meta as well
+      props: shape.props,
+      meta: shape.meta,
     });
 
     editor.select(newShapeId);
   };
 
-  // Download image
+  // Download shape media
   const handleDownload = async () => {
-    const meta = getSelectedImageMeta();
+    const meta = selectedMeta;
 
-    // For uploading images, use the local preview URL if available
     let downloadUrl: string | null = null;
     if (meta?.source === "uploading" && meta.localPreviewUrl) {
       downloadUrl = meta.localPreviewUrl;
     } else {
-      downloadUrl = getSelectedImageDataUrl();
+      downloadUrl = getSelectedDownloadUrl();
     }
 
     if (!downloadUrl) return;
 
     try {
-      // Handle both data URLs and regular URLs
-      let blob: Blob;
+      const response = await fetch(downloadUrl);
+      const blob = await response.blob();
 
-      if (downloadUrl.startsWith("data:")) {
-        // Convert data URL to blob
-        const response = await fetch(downloadUrl);
-        blob = await response.blob();
-      } else {
-        // Fetch from URL
-        const response = await fetch(downloadUrl);
-        blob = await response.blob();
-      }
-
-      // Create download link with original filename if available
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = meta?.originalFileName || `image-${Date.now()}.png`;
+      const isVideo = selectedShapeType === VIDEO_SHAPE_TYPE;
+      link.download = meta?.originalFileName || `${isVideo ? "video" : "image"}-${Date.now()}.${isVideo ? "mp4" : "png"}`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -183,13 +177,12 @@ export function FloatingToolbar() {
     }
   };
 
-  // Handle inpaint button click
+  // Handle inpaint button click (image only)
   const handleInpaint = () => {
-    const dataUrl = getSelectedImageDataUrl();
-    if (!dataUrl || !selectedImageId) return;
+    const dataUrl = getSelectedDownloadUrl();
+    if (!dataUrl || !selectedShapeId || selectedShapeType !== "image") return;
 
-    // Check if this is a generating placeholder or uploading
-    const meta = getSelectedImageMeta();
+    const meta = selectedMeta;
     if (meta?.source === "generating") {
       alert("请等待图片生成完成");
       return;
@@ -199,19 +192,18 @@ export function FloatingToolbar() {
       return;
     }
 
-    // Enter inpaint mode with the selected image
-    enterInpaintMode(selectedImageId, dataUrl);
+    enterInpaintMode(selectedShapeId, dataUrl);
   };
 
-  // Check if current image is uploading
-  const isUploading = getSelectedImageMeta()?.source === "uploading";
+  const isImage = selectedShapeType === "image";
+  const isUploading = selectedMeta?.source === "uploading";
 
-  // Hide toolbar when no image selected, no position, during drag, or in edit mode
-  if (!selectedImageId || !toolbarPosition || isDragging || editMode !== "normal") {
+  // Hide toolbar when no shape selected, no position, during drag, or in edit mode
+  if (!selectedShapeId || !toolbarPosition || isDragging || editMode !== "normal") {
     return null;
   }
 
-  const meta = getSelectedImageMeta();
+  const meta = selectedMeta;
 
   // Note: pointer-events-auto is needed because tldraw's InFrontOfTheCanvas has pointer-events: none
   return (
@@ -227,7 +219,7 @@ export function FloatingToolbar() {
       <button
         onClick={handleCopy}
         className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
-        title="复制图片"
+        title="复制"
       >
         <Copy className="h-4 w-4" />
         <span>复制</span>
@@ -237,7 +229,7 @@ export function FloatingToolbar() {
       <button
         onClick={handleDownload}
         className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
-        title="下载图片"
+        title="下载"
       >
         <Download className="h-4 w-4" />
         <span>下载</span>
@@ -246,21 +238,25 @@ export function FloatingToolbar() {
       {/* Divider */}
       <div className="mx-1 h-6 w-px bg-gray-200" />
 
-      {/* Inpaint */}
-      <button
-        onClick={handleInpaint}
-        disabled={isUploading}
-        className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
-          isUploading ? "cursor-not-allowed text-gray-400" : "text-gray-700 hover:bg-gray-100"
-        }`}
-        title={isUploading ? "请等待图片上传完成" : "局部重绘"}
-      >
-        <Paintbrush className="h-4 w-4" />
-        <span>局部重绘</span>
-      </button>
+      {/* Inpaint (image only) */}
+      {isImage && (
+        <>
+          <button
+            onClick={handleInpaint}
+            disabled={isUploading}
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+              isUploading ? "cursor-not-allowed text-gray-400" : "text-gray-700 hover:bg-gray-100"
+            }`}
+            title={isUploading ? "请等待图片上传完成" : "局部重绘"}
+          >
+            <Paintbrush className="h-4 w-4" />
+            <span>局部重绘</span>
+          </button>
 
-      {/* Divider */}
-      <div className="mx-1 h-6 w-px bg-gray-200" />
+          {/* Divider */}
+          <div className="mx-1 h-6 w-px bg-gray-200" />
+        </>
+      )}
 
       {/* Info */}
       <div className="relative" ref={infoRef}>
@@ -277,11 +273,23 @@ export function FloatingToolbar() {
 
         {/* Info Popover */}
         {showInfo && (
-          <div className="absolute bottom-full left-1/2 mb-2 w-64 -translate-x-1/2 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
+          <div className="absolute bottom-full left-1/2 mb-2 w-72 -translate-x-1/2 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
             <div className="border-b border-gray-100 px-4 py-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">图片信息</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                {isImage ? "图片信息" : "视频信息"}
+              </p>
             </div>
             <div className="space-y-2.5 px-4 py-3">
+              {/* File Name */}
+              {meta?.originalFileName && (
+                <div className="flex items-start justify-between gap-2">
+                  <span className="shrink-0 text-xs text-gray-500">文件名</span>
+                  <span className="truncate text-xs font-medium text-gray-900">
+                    {meta.originalFileName}
+                  </span>
+                </div>
+              )}
+
               {/* Source */}
               <div className="flex items-start justify-between">
                 <span className="text-xs text-gray-500">来源</span>
@@ -305,6 +313,14 @@ export function FloatingToolbar() {
                   <span className="text-xs font-medium text-gray-900">
                     {meta.originalWidth} × {meta.originalHeight}
                   </span>
+                </div>
+              )}
+
+              {/* Duration (video only) */}
+              {meta?.duration && (
+                <div className="flex items-start justify-between">
+                  <span className="text-xs text-gray-500">时长</span>
+                  <span className="text-xs font-medium text-gray-900">{meta.duration}s</span>
                 </div>
               )}
 
@@ -332,6 +348,16 @@ export function FloatingToolbar() {
                   <span className="mb-1 block text-xs text-gray-500">Prompt</span>
                   <p className="line-clamp-4 text-xs leading-relaxed text-gray-700">
                     {meta.prompt}
+                  </p>
+                </div>
+              )}
+
+              {/* AI Description */}
+              {meta?.description && (
+                <div className="border-t border-gray-100 pt-2">
+                  <span className="mb-1 block text-xs text-gray-500">AI 描述</span>
+                  <p className="line-clamp-6 text-xs leading-relaxed text-gray-700">
+                    {meta.description}
                   </p>
                 </div>
               )}

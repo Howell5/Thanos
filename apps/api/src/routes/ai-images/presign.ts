@@ -14,6 +14,7 @@ import { db } from "../../db";
 import { aiImages } from "../../db/schema";
 import { getSessionOrMock } from "../../lib/mock-session";
 import { errors, ok } from "../../lib/response";
+import { triggerShapeDescribe } from "../../services/shape-describe.service";
 import "../../services/types";
 import { verifyProjectAccess } from "./helpers";
 
@@ -74,7 +75,8 @@ const presignRoute = new Hono()
       return errors.unauthorized(c);
     }
 
-    const { projectId, key, filename, contentType, fileSize, width, height } = c.req.valid("json");
+    const { projectId, key, filename, contentType, fileSize, width, height, shapeId } =
+      c.req.valid("json");
 
     // Verify project access
     const { error: projectError } = await verifyProjectAccess(c, projectId, session.user.id);
@@ -110,6 +112,19 @@ const presignRoute = new Hono()
         status: "completed",
       })
       .returning();
+
+    // Fire-and-forget: trigger AI description for image uploads
+    if (shapeId && !isVideoType(contentType)) {
+      triggerShapeDescribe({
+        shapeId,
+        projectId,
+        userId: session.user.id,
+        assetUrl: r2Url,
+        mediaType: "image",
+        mimeType: contentType,
+        originalFileName: filename,
+      });
+    }
 
     return ok(
       c,

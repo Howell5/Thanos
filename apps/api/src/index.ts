@@ -48,6 +48,7 @@ import editingPlansRoute from "./routes/editing-plans/index";
 import ordersRoute from "./routes/orders";
 import postsRoute from "./routes/posts";
 import projectsRoute from "./routes/projects";
+import shapeMetadataRoute from "./routes/shape-metadata";
 import userRoute from "./routes/user";
 import videosRoute from "./routes/videos/index";
 import webhooksRoute from "./routes/webhooks";
@@ -155,6 +156,7 @@ const app = baseApp
   .route("/api/user", userRoute)
   .route("/api/videos", videosRoute)
   .route("/api/editing-plans", editingPlansRoute)
+  .route("/api/shape-metadata", shapeMetadataRoute)
   .route("/api/agent", agentRoute);
 
 /**
