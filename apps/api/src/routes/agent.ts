@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync } from "node:fs";
+import { resolve } from "node:path";
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { zValidator } from "@hono/zod-validator";
@@ -87,13 +88,8 @@ const mentionedShapeSchema = z.object({
 // Request schema
 const runAgentSchema = z.object({
   prompt: z.string().min(1),
-  workspacePath: z.string().min(1),
   sessionId: z.string().optional(),
-  projectId: z
-    .string()
-    .uuid()
-    .optional()
-    .describe("Project ID for canvas tools access"),
+  projectId: z.string().uuid().describe("Project ID for workspace and canvas tools"),
   mentionedShapes: z.array(mentionedShapeSchema).optional(),
 });
 
@@ -148,10 +144,7 @@ async function buildPromptWithShapeContext(
   const content: SDKUserMessage["message"]["content"] = [
     {
       type: "text" as const,
-      text: [
-        "The user is referring to these canvas shapes:",
-        contextLines.join("\n"),
-      ].join("\n"),
+      text: ["The user is referring to these canvas shapes:", contextLines.join("\n")].join("\n"),
     },
   ];
 
@@ -190,217 +183,212 @@ type AgentMessage =
   | { type: "result"; cost: number; inputTokens: number; outputTokens: number }
   | { type: "error"; message: string };
 
-const agentRoute = new Hono().post(
-  "/run",
-  zValidator("json", runAgentSchema),
-  async (c) => {
-    const session = await getSessionOrMock(c);
-    if (!session) {
-      return errors.unauthorized(c);
-    }
+const agentRoute = new Hono().post("/run", zValidator("json", runAgentSchema), async (c) => {
+  const session = await getSessionOrMock(c);
+  if (!session) {
+    return errors.unauthorized(c);
+  }
 
-    const {
+  const { prompt: rawPrompt, sessionId, projectId, mentionedShapes } = c.req.valid("json");
+  const userId = session.user.id;
+
+  // Generate workspace path from projectId (server-side only)
+  const workspacePath = resolve("workspaces", projectId);
+
+  // Build prompt — embed image thumbnails as multimodal content blocks when available
+  const promptContent = mentionedShapes?.length
+    ? await buildPromptWithShapeContext(rawPrompt, mentionedShapes)
+    : rawPrompt;
+
+  // If multimodal (array of content blocks), wrap in an async generator yielding SDKUserMessage
+  const prompt: string | AsyncIterable<SDKUserMessage> =
+    typeof promptContent === "string"
+      ? promptContent
+      : (async function* () {
+          yield {
+            type: "user" as const,
+            message: { role: "user" as const, content: promptContent },
+            parent_tool_use_id: null,
+            session_id: "",
+          };
+        })();
+
+  // Ensure workspace directory exists
+  if (!existsSync(workspacePath)) {
+    mkdirSync(workspacePath, { recursive: true });
+  }
+
+  // Dev-only: create logger for this agent run
+  const isDev = process.env.NODE_ENV !== "production";
+  const logger = isDev ? new AgentLogger(sessionId) : null;
+  if (logger) {
+    logger.logRequest({
       prompt: rawPrompt,
       workspacePath,
-      sessionId,
       projectId,
+      sessionId,
       mentionedShapes,
-    } = c.req.valid("json");
-    const userId = session.user.id;
+    });
+    console.log(`[Agent] Log: ${logger.getFilePath()}`);
+  }
 
-    // Build prompt — embed image thumbnails as multimodal content blocks when available
-    const promptContent = mentionedShapes?.length
-      ? await buildPromptWithShapeContext(rawPrompt, mentionedShapes)
-      : rawPrompt;
+  return streamSSE(c, async (stream) => {
+    // Per-request state for message transformation
+    const state = {
+      hasOpenText: false,
+      toolUseIdToName: new Map<string, string>(),
+    };
 
-    // If multimodal (array of content blocks), wrap in an async generator yielding SDKUserMessage
-    const prompt: string | AsyncIterable<SDKUserMessage> =
-      typeof promptContent === "string"
-        ? promptContent
-        : (async function* () {
-            yield {
-              type: "user" as const,
-              message: { role: "user" as const, content: promptContent },
-              parent_tool_use_id: null,
-              session_id: "",
-            };
-          })();
+    // EventEmitter bridge for canvas tools → SSE stream
+    const pendingShapeEvents: CanvasShapeInstruction[] = [];
+    const pendingMoveEvents: MoveShapesPayload[] = [];
+    const pendingResizeEvents: ResizeShapesPayload[] = [];
+    const pendingMetaEvents: UpdateShapeMetaPayload[] = [];
+    const emitter = createCanvasToolsEmitter();
+    emitter.on("add_shape", (payload) => pendingShapeEvents.push(payload));
+    emitter.on("move_shapes", (payload) => pendingMoveEvents.push(payload));
+    emitter.on("resize_shapes", (payload) => pendingResizeEvents.push(payload));
+    emitter.on("update_shape_meta", (payload) => pendingMetaEvents.push(payload));
 
-    // Ensure workspace directory exists (guard against stale paths from client)
-    if (!existsSync(workspacePath)) {
-      mkdirSync(workspacePath, { recursive: true });
-    }
-
-    // Dev-only: create logger for this agent run
-    const isDev = process.env.NODE_ENV !== "production";
-    const logger = isDev ? new AgentLogger(sessionId) : null;
-    if (logger) {
-      logger.logRequest({
-        prompt: rawPrompt,
-        workspacePath,
-        projectId,
-        sessionId,
-        mentionedShapes,
-      });
-      console.log(`[Agent] Log: ${logger.getFilePath()}`);
-    }
-
-    return streamSSE(c, async (stream) => {
-      // Per-request state for message transformation
-      const state = {
-        hasOpenText: false,
-        toolUseIdToName: new Map<string, string>(),
-      };
-
-      // EventEmitter bridge for canvas tools → SSE stream
-      const pendingShapeEvents: CanvasShapeInstruction[] = [];
-      const pendingMoveEvents: MoveShapesPayload[] = [];
-      const pendingResizeEvents: ResizeShapesPayload[] = [];
-      const pendingMetaEvents: UpdateShapeMetaPayload[] = [];
-      const emitter = createCanvasToolsEmitter();
-      emitter.on("add_shape", (payload) => pendingShapeEvents.push(payload));
-      emitter.on("move_shapes", (payload) => pendingMoveEvents.push(payload));
-      emitter.on("resize_shapes", (payload) =>
-        pendingResizeEvents.push(payload),
-      );
-      emitter.on("update_shape_meta", (payload) =>
-        pendingMetaEvents.push(payload),
-      );
-
-      // Helper to flush all pending canvas events to the SSE stream
-      async function drainCanvasEvents() {
-        while (pendingShapeEvents.length > 0) {
-          const instruction = pendingShapeEvents.shift()!;
-          logger?.logShapeEvent(instruction);
-          await stream.writeSSE({
-            data: JSON.stringify({ type: "canvas_add_shape", instruction }),
-            event: "canvas_add_shape",
-          });
-        }
-        while (pendingMoveEvents.length > 0) {
-          const payload = pendingMoveEvents.shift()!;
-          await stream.writeSSE({
-            data: JSON.stringify({ type: "canvas_move_shapes", payload }),
-            event: "canvas_move_shapes",
-          });
-        }
-        while (pendingResizeEvents.length > 0) {
-          const payload = pendingResizeEvents.shift()!;
-          await stream.writeSSE({
-            data: JSON.stringify({ type: "canvas_resize_shapes", payload }),
-            event: "canvas_resize_shapes",
-          });
-        }
-        while (pendingMetaEvents.length > 0) {
-          const payload = pendingMetaEvents.shift()!;
-          await stream.writeSSE({
-            data: JSON.stringify({
-              type: "canvas_update_shape_meta",
-              payload,
-            }),
-            event: "canvas_update_shape_meta",
-          });
-        }
-      }
-
-      try {
-        // Build MCP servers config — add canvas tools if projectId is provided
-        const mcpServers: Record<
-          string,
-          ReturnType<typeof createCanvasToolsServer>
-        > = {};
-        const allowedTools: string[] = [];
-
-        if (projectId) {
-          mcpServers["canvas-tools"] = createCanvasToolsServer(
-            projectId,
-            userId,
-            emitter,
-          );
-          allowedTools.push(...CANVAS_TOOL_NAMES);
-        }
-
-        const hasCanvasTools = Object.keys(mcpServers).length > 0;
-
-        // Built-in tools
-        allowedTools.push("Read", "Write", "WebSearch", "WebFetch");
-
-        // Subagent definitions
-        const agents: Record<
-          string,
-          { description: string; prompt: string; tools?: string[] }
-        > = {
-          "visual-expert": {
-            description:
-              "Visual design and image analysis expert. Use for tasks requiring deep visual understanding, image comparison, style analysis, or creative direction.",
-            prompt: [
-              "You are a Visual Expert — skilled in visual design, image analysis, and creative direction.",
-              "You can see and analyze images on the canvas, generate new images, search the web for visual references, and provide detailed feedback on composition, color, style, and branding.",
-              "Be specific and actionable in your visual analysis. Reference concrete elements (colors, layout, typography, mood) rather than giving vague feedback.",
-              "Respond in the same language the user writes in.",
-            ].join("\n"),
-          },
-        };
-
-        // Give subagents the same tool access as the master agent
-        allowedTools.push("Task");
-
-        const queryResult = query({
-          prompt,
-          options: {
-            model: "claude-opus-4-6",
-            systemPrompt: buildSystemPrompt(hasCanvasTools),
-            cwd: workspacePath,
-            executable: process.execPath as "node",
-            env: { ...process.env },
-            sandbox: {
-              enabled: true,
-              autoAllowBashIfSandboxed: true,
-              network: { allowLocalBinding: true },
-            },
-            permissionMode: "acceptEdits",
-            maxTurns: 30,
-            includePartialMessages: true,
-            allowedTools,
-            agents,
-            ...(sessionId ? { resume: sessionId } : {}),
-            ...(hasCanvasTools ? { mcpServers } : {}),
-          },
+    // Helper to flush all pending canvas events to the SSE stream
+    async function drainCanvasEvents() {
+      while (pendingShapeEvents.length > 0) {
+        const instruction = pendingShapeEvents.shift()!;
+        logger?.logShapeEvent(instruction);
+        await stream.writeSSE({
+          data: JSON.stringify({ type: "canvas_add_shape", instruction }),
+          event: "canvas_add_shape",
         });
-
-        for await (const msg of queryResult) {
-          logger?.logSdkMessage(msg);
-
-          // Drain any canvas events queued by tool handlers
-          await drainCanvasEvents();
-
-          const messages = transformMessage(msg, state);
-          for (const m of messages) {
-            await stream.writeSSE({
-              data: JSON.stringify(m),
-              event: m.type,
-            });
-          }
-        }
-
-        await drainCanvasEvents();
-        logger?.logDone();
-      } catch (error) {
-        // Flush any canvas events that succeeded before the error
-        await drainCanvasEvents();
-        console.error("[Agent] Error:", error);
-        logger?.logError(error);
+      }
+      while (pendingMoveEvents.length > 0) {
+        const payload = pendingMoveEvents.shift()!;
+        await stream.writeSSE({
+          data: JSON.stringify({ type: "canvas_move_shapes", payload }),
+          event: "canvas_move_shapes",
+        });
+      }
+      while (pendingResizeEvents.length > 0) {
+        const payload = pendingResizeEvents.shift()!;
+        await stream.writeSSE({
+          data: JSON.stringify({ type: "canvas_resize_shapes", payload }),
+          event: "canvas_resize_shapes",
+        });
+      }
+      while (pendingMetaEvents.length > 0) {
+        const payload = pendingMetaEvents.shift()!;
         await stream.writeSSE({
           data: JSON.stringify({
-            type: "error",
-            message: error instanceof Error ? error.message : String(error),
+            type: "canvas_update_shape_meta",
+            payload,
           }),
-          event: "error",
+          event: "canvas_update_shape_meta",
         });
       }
-    });
-  },
-);
+    }
+
+    try {
+      // Build MCP servers config — add canvas tools if projectId is provided
+      const mcpServers: Record<string, ReturnType<typeof createCanvasToolsServer>> = {};
+      const allowedTools: string[] = [];
+
+      if (projectId) {
+        mcpServers["canvas-tools"] = createCanvasToolsServer(projectId, userId, emitter);
+        allowedTools.push(...CANVAS_TOOL_NAMES);
+      }
+
+      const hasCanvasTools = Object.keys(mcpServers).length > 0;
+
+      // Built-in tools
+      allowedTools.push("Read", "Write", "WebSearch", "WebFetch");
+
+      // Subagent definitions
+      const agents: Record<string, { description: string; prompt: string; tools?: string[] }> = {
+        "visual-expert": {
+          description:
+            "Visual design and image analysis expert. Use for tasks requiring deep visual understanding, image comparison, style analysis, or creative direction.",
+          prompt: [
+            "You are a Visual Expert — skilled in visual design, image analysis, and creative direction.",
+            "You can see and analyze images on the canvas, generate new images, search the web for visual references, and provide detailed feedback on composition, color, style, and branding.",
+            "Be specific and actionable in your visual analysis. Reference concrete elements (colors, layout, typography, mood) rather than giving vague feedback.",
+            "Respond in the same language the user writes in.",
+          ].join("\n"),
+        },
+      };
+
+      // Give subagents the same tool access as the master agent
+      allowedTools.push("Task");
+
+      // Build env for agent subprocess — inject Anthropic credentials if configured
+      const agentEnv: Record<string, string> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (v !== undefined) agentEnv[k] = v;
+      }
+      if (process.env.ANTHROPIC_API_KEY) {
+        agentEnv.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+      }
+      if (process.env.ANTHROPIC_BASE_URL) {
+        agentEnv.ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL;
+      }
+
+      console.log(
+        `[Agent] Env: API_KEY=${agentEnv.ANTHROPIC_API_KEY ? `${agentEnv.ANTHROPIC_API_KEY.slice(0, 8)}...` : "(not set)"}, BASE_URL=${agentEnv.ANTHROPIC_BASE_URL ?? "(default)"}`,
+      );
+
+      const queryResult = query({
+        prompt,
+        options: {
+          model: "claude-opus-4-6",
+          systemPrompt: buildSystemPrompt(hasCanvasTools),
+          cwd: workspacePath,
+          executable: process.execPath as "node",
+          env: agentEnv,
+          sandbox: {
+            enabled: true,
+            autoAllowBashIfSandboxed: true,
+            network: { allowLocalBinding: true },
+          },
+          permissionMode: "acceptEdits",
+          maxTurns: 30,
+          includePartialMessages: true,
+          allowedTools,
+          agents,
+          ...(sessionId ? { resume: sessionId } : {}),
+          ...(hasCanvasTools ? { mcpServers } : {}),
+        },
+      });
+
+      for await (const msg of queryResult) {
+        logger?.logSdkMessage(msg);
+
+        // Drain any canvas events queued by tool handlers
+        await drainCanvasEvents();
+
+        const messages = transformMessage(msg, state);
+        for (const m of messages) {
+          await stream.writeSSE({
+            data: JSON.stringify(m),
+            event: m.type,
+          });
+        }
+      }
+
+      await drainCanvasEvents();
+      logger?.logDone();
+    } catch (error) {
+      // Flush any canvas events that succeeded before the error
+      await drainCanvasEvents();
+      console.error("[Agent] Error:", error);
+      logger?.logError(error);
+      await stream.writeSSE({
+        data: JSON.stringify({
+          type: "error",
+          message: error instanceof Error ? error.message : String(error),
+        }),
+        event: "error",
+      });
+    }
+  });
+});
 
 interface TransformState {
   hasOpenText: boolean;
@@ -463,9 +451,7 @@ function transformMessage(msg: unknown, state: TransformState): AgentMessage[] {
             type: "tool_result",
             toolId,
             output:
-              typeof block.content === "string"
-                ? block.content
-                : JSON.stringify(block.content),
+              typeof block.content === "string" ? block.content : JSON.stringify(block.content),
           });
         }
       }

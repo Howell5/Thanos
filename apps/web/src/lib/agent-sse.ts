@@ -43,9 +43,8 @@ export interface MentionedShapeContext {
 
 export interface AgentRunParams {
   prompt: string;
-  workspacePath: string;
   sessionId?: string;
-  projectId?: string;
+  projectId: string;
   mentionedShapes?: MentionedShapeContext[];
 }
 

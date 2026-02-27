@@ -24,8 +24,13 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Mention input hook
-  const { mentionState, handleChange, handleKeyDown: handleMentionKeyDown, insertMention, closeMention } =
-    useMentionInput(prompt, setPrompt, textareaRef);
+  const {
+    mentionState,
+    handleChange,
+    handleKeyDown: handleMentionKeyDown,
+    insertMention,
+    closeMention,
+  } = useMentionInput(prompt, setPrompt, textareaRef);
 
   // Store state
   const status = useAgentStore((s) => s.status);
@@ -91,9 +96,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
   const handleMentionSelect = useCallback(
     (shape: CanvasShapeSummary) => {
       insertMention(shape);
-      setMentionedShapes((prev) =>
-        prev.some((s) => s.id === shape.id) ? prev : [...prev, shape],
-      );
+      setMentionedShapes((prev) => (prev.some((s) => s.id === shape.id) ? prev : [...prev, shape]));
     },
     [insertMention],
   );
@@ -169,8 +172,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
           rows={3}
           className="mb-2 w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
         />
-        <div className="flex items-center justify-between">
-          <span className="truncate text-[10px] text-gray-400">~/workspaces/test-project</span>
+        <div className="flex items-center justify-end">
           <div className="flex items-center gap-2">
             <Button
               variant="outline"

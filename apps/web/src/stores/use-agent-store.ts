@@ -48,7 +48,6 @@ interface AgentState {
   messages: ChatMessage[];
 
   /** Configuration */
-  workspacePath: string;
   projectId: string | null;
 
   /** Per-project session storage */
@@ -58,7 +57,6 @@ interface AgentState {
   _abortFn: (() => void) | null;
 
   // Actions
-  setWorkspacePath: (path: string) => void;
   setProjectId: (id: string | null) => void;
   sendMessage: (prompt: string, mentionedShapes?: MentionedShapeContext[]) => void;
   stop: () => void;
@@ -68,14 +66,6 @@ interface AgentState {
     data: { sessionId: string | null; messages: ChatMessage[]; status: AgentStatus },
   ) => void;
 }
-
-const DEFAULT_WORKSPACE_PATH = (() => {
-  const p = import.meta.env.VITE_WORKSPACE_PATH;
-  if (!p) {
-    console.warn("[Agent] VITE_WORKSPACE_PATH is not set in .env — agent workspace will not work correctly.");
-  }
-  return p || "";
-})();
 
 const EMPTY_SESSION: ProjectSession = {
   sessionId: null,
@@ -116,12 +106,9 @@ export const useAgentStore = create<AgentState>()(
       sessionId: null,
       error: null,
       messages: [],
-      workspacePath: DEFAULT_WORKSPACE_PATH,
       projectId: null,
       sessions: {},
       _abortFn: null,
-
-      setWorkspacePath: (path: string) => set({ workspacePath: path }),
 
       setProjectId: (id: string | null) => {
         const state = get();
@@ -150,8 +137,13 @@ export const useAgentStore = create<AgentState>()(
       },
 
       sendMessage: (prompt: string, mentionedShapes?: MentionedShapeContext[]) => {
-        const { workspacePath, sessionId, projectId, _abortFn } = get();
+        const { sessionId, projectId, _abortFn } = get();
         if (_abortFn) _abortFn();
+
+        if (!projectId) {
+          console.error("[Agent] Cannot send message without a projectId");
+          return;
+        }
 
         const isResume = sessionId !== null;
 
@@ -175,9 +167,8 @@ export const useAgentStore = create<AgentState>()(
         const abort = subscribeAgentSSE(
           {
             prompt,
-            workspacePath,
+            projectId,
             ...(isResume && sessionId ? { sessionId } : {}),
-            ...(projectId ? { projectId } : {}),
             ...(mentionedShapes?.length ? { mentionedShapes } : {}),
           },
           (msg) => {
