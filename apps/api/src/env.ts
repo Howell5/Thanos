@@ -39,6 +39,9 @@ const envSchema = z.object({
   KIMI_API_KEY: z.string().optional(),
   // fal.ai API key (for Seedream v5 image generation)
   FAL_KEY: z.string().optional(),
+  // Anthropic API (for Claude Agent SDK)
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_BASE_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
