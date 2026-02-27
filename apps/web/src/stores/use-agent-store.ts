@@ -69,8 +69,13 @@ interface AgentState {
   ) => void;
 }
 
-const DEFAULT_WORKSPACE_PATH =
-  import.meta.env.VITE_WORKSPACE_PATH || "/Users/xerwanderer/Developer/Thanos/workspaces/default";
+const DEFAULT_WORKSPACE_PATH = (() => {
+  const p = import.meta.env.VITE_WORKSPACE_PATH;
+  if (!p) {
+    console.warn("[Agent] VITE_WORKSPACE_PATH is not set in .env — agent workspace will not work correctly.");
+  }
+  return p || "";
+})();
 
 const EMPTY_SESSION: ProjectSession = {
   sessionId: null,
